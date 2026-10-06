@@ -709,7 +709,7 @@ function initPWA() {
   window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; $('#install-btn').hidden = false; });
   $('#install-btn').addEventListener('click', async () => { if (!installEvt) return; installEvt.prompt(); await installEvt.userChoice; installEvt = null; $('#install-btn').hidden = true; });
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('sw.js').catch(() => { /* офлайн-режим недоступний — не критично */ });
+    try { navigator.serviceWorker.register('sw.js').catch(() => { /* офлайн-режим недоступний — не критично */ }); } catch { /* sandbox */ }
   }
 }
 
