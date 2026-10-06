@@ -1,0 +1,4 @@
+# Netlify / Cloudflare Pages: публікувати папку web, збірка не потрібна
+[build]
+  publish = "web"
+  command = ""

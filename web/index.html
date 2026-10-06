@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>DietOpt — раціон студента за мінімальну ціну</title>
+  <meta name="description" content="Безкоштовний планувальник харчування: розраховує норми КБЖУ і складає найдешевший збалансований раціон на день і тиждень, зі списком покупок і рецептами.">
+  <meta name="theme-color" content="#2f6b3f" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#121512" media="(prefers-color-scheme: dark)">
+  <meta property="og:title" content="DietOpt — раціон студента за мінімальну ціну">
+  <meta property="og:description" content="Норми КБЖУ, оптимальне меню, тижневий план і список покупок. Безкоштовно, без реєстрації.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="icons/og.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="DietOpt">
+  <link rel="stylesheet" href="css/fonts.css">
+  <link rel="stylesheet" href="css/app.css">
+  <script>
+    // тема застосовується до першого рендеру, щоб не було «спалаху»
+    (function () {
+      var t = null; try { t = localStorage.getItem('dietopt.theme'); } catch (e) {}
+      if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
+</head>
+<body>
+<a class="skip" href="#main">Перейти до вмісту</a>
+
+<header class="topbar">
+  <div class="topbar__inner">
+    <a class="brand" href="#/plan" aria-label="DietOpt — на головну">
+      <svg class="brand__mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <path d="M4 15h24a12 12 0 0 1-24 0Z" fill="currentColor"/>
+        <path d="M9 11.5 14 7l4 3 6-6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="24" cy="4" r="2.2" fill="var(--color-accent)"/>
+      </svg>
+      <span class="brand__name">Diet<b>Opt</b></span>
+    </a>
+    <nav class="topnav" aria-label="Розділи">
+      <a href="#/plan" data-nav="plan">Раціон</a>
+      <a href="#/week" data-nav="week">Тиждень</a>
+      <a href="#/list" data-nav="list">Покупки <span class="pill" data-count-list hidden></span></a>
+      <a href="#/foods" data-nav="foods">Продукти</a>
+      <a href="#/more" data-nav="more">Ще</a>
+    </nav>
+    <div class="topbar__actions">
+      <button class="icon-btn" id="theme-toggle" type="button" aria-label="Змінити тему">
+        <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        <svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main id="main" class="main" tabindex="-1">
+  <!-- ═════════════ РАЦІОН ═════════════ -->
+  <section class="page" data-page="plan">
+    <div class="plan-layout">
+      <aside class="panel profile" aria-labelledby="profile-title">
+        <div class="panel__head">
+          <h1 id="profile-title" class="h-page">Ваш профіль</h1>
+          <p class="muted small">Дані залишаються лише на вашому пристрої.</p>
+        </div>
+        <form id="profile-form" class="form" novalidate>
+          <fieldset class="field">
+            <legend class="label">Стать</legend>
+            <div class="seg" role="radiogroup">
+              <label><input type="radio" name="gender" value="male" checked><span>Чоловік</span></label>
+              <label><input type="radio" name="gender" value="female"><span>Жінка</span></label>
+            </div>
+          </fieldset>
+          <div class="grid-3">
+            <label class="field"><span class="label">Вік</span>
+              <span class="input-wrap"><input name="age" type="number" inputmode="numeric" min="14" max="80" value="20" required><i>р.</i></span></label>
+            <label class="field"><span class="label">Зріст</span>
+              <span class="input-wrap"><input name="height" type="number" inputmode="numeric" min="140" max="220" value="175" required><i>см</i></span></label>
+            <label class="field"><span class="label">Вага</span>
+              <span class="input-wrap"><input name="weight" type="number" inputmode="decimal" step="0.1" min="40" max="200" value="70" required><i>кг</i></span></label>
+          </div>
+          <label class="field"><span class="label">Бюджет на день <output id="budget-out" class="num">200 грн</output></span>
+            <input name="budget" type="range" min="50" max="1000" step="10" value="200" class="range">
+            <span class="range-scale small muted"><span>50</span><span>350</span><span>700</span><span>1000 грн</span></span>
+          </label>
+          <label class="field"><span class="label">Активність</span>
+            <select name="activity_level">
+              <option value="sedentary">Сидячий спосіб життя</option>
+              <option value="light" selected>Легка (1–3 тренування на тиждень)</option>
+              <option value="moderate">Помірна (3–5 тренувань)</option>
+              <option value="active">Висока (6–7 тренувань)</option>
+              <option value="very_active">Дуже висока (спорт / фізична робота)</option>
+            </select>
+          </label>
+          <fieldset class="field">
+            <legend class="label">Мета</legend>
+            <div class="seg seg--3" role="radiogroup">
+              <label><input type="radio" name="goal" value="loss"><span>Схуднути</span></label>
+              <label><input type="radio" name="goal" value="maintain" checked><span>Тримати</span></label>
+              <label><input type="radio" name="goal" value="gain"><span>Набрати</span></label>
+            </div>
+          </fieldset>
+          <fieldset class="field">
+            <legend class="label">Тип харчування</legend>
+            <div class="seg seg--3" role="radiogroup">
+              <label><input type="radio" name="diet_type" value="standard" checked><span>Всеїдне</span></label>
+              <label><input type="radio" name="diet_type" value="vegetarian"><span>Вегетар.</span></label>
+              <label><input type="radio" name="diet_type" value="vegan"><span>Веган</span></label>
+            </div>
+          </fieldset>
+          <fieldset class="field">
+            <legend class="label">Не їм / алергія</legend>
+            <div class="chips" id="allergy-chips"></div>
+            <input name="allergies_extra" type="text" placeholder="Інше через кому: томат, свинина…" autocomplete="off">
+          </fieldset>
+          <button class="btn btn--primary btn--block btn--lg" type="submit" id="run-btn">
+            Скласти раціон
+          </button>
+          <p class="form-error" id="form-error" role="alert" hidden></p>
+        </form>
+      </aside>
+
+      <div class="results" id="results" aria-live="polite">
+        <div class="hero-empty" id="plan-empty">
+          <p class="eyebrow">Безкоштовно · без реєстрації · працює офлайн</p>
+          <h2 class="h-hero">Повноцінне харчування<br>за мінімальну ціну</h2>
+          <p class="lead">DietOpt рахує вашу норму калорій і білків-жирів-вуглеводів, а потім методом лінійного програмування підбирає з 500+ продуктів найдешевше меню на день — зі списком покупок і простими рецептами.</p>
+          <ol class="how">
+            <li><b>1</b><span>Заповніть профіль — 30 секунд</span></li>
+            <li><b>2</b><span>Отримайте меню на 4 прийоми їжі</span></li>
+            <li><b>3</b><span>Додайте продукти до списку покупок</span></li>
+          </ol>
+        </div>
+        <div id="plan-output" hidden></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═════════════ ТИЖДЕНЬ ═════════════ -->
+  <section class="page" data-page="week" hidden>
+    <div class="page-head">
+      <div>
+        <h1 class="h-page">План на тиждень</h1>
+        <p class="muted">Сім різних меню під ваш профіль — щоб не їсти одне й те саме.</p>
+      </div>
+      <div class="page-head__actions">
+        <button class="btn btn--primary" id="week-build" type="button">Скласти тиждень</button>
+      </div>
+    </div>
+    <div id="week-output"></div>
+  </section>
+
+  <!-- ═════════════ ПОКУПКИ ═════════════ -->
+  <section class="page" data-page="list" hidden>
+    <div class="page-head">
+      <div>
+        <h1 class="h-page">Список покупок</h1>
+        <p class="muted">Відмічайте куплене прямо в магазині. Список зберігається на телефоні.</p>
+      </div>
+      <div class="page-head__actions">
+        <button class="btn" id="list-share" type="button">Поділитися</button>
+        <button class="btn btn--ghost" id="list-clear" type="button">Очистити</button>
+      </div>
+    </div>
+    <div id="list-output"></div>
+  </section>
+
+  <!-- ═════════════ ПРОДУКТИ ═════════════ -->
+  <section class="page" data-page="foods" hidden>
+    <div class="page-head">
+      <div>
+        <h1 class="h-page">База продуктів</h1>
+        <p class="muted">Харчова цінність і ціна за 100 г. Торкніться продукту, щоб указати ціну у вашому магазині або виключити його.</p>
+      </div>
+    </div>
+    <div class="foods-tools">
+      <label class="search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="food-search" type="search" placeholder="Пошук: курка, гречка, яблуко…" autocomplete="off" aria-label="Пошук продуктів">
+      </label>
+      <select id="food-sort" aria-label="Сортування">
+        <option value="name">За назвою</option>
+        <option value="price">Найдешевші</option>
+        <option value="protein_per_uah">Білка на 10 грн</option>
+        <option value="kcal_per_uah">Калорій на 10 грн</option>
+        <option value="protein">Найбільше білка</option>
+      </select>
+    </div>
+    <div class="chips chips--scroll" id="food-cats"></div>
+    <div id="foods-output"></div>
+  </section>
+
+  <!-- ═════════════ ЩЕ ═════════════ -->
+  <section class="page" data-page="more" hidden>
+    <div class="page-head"><div><h1 class="h-page">Ще</h1></div></div>
+    <div class="more-grid">
+      <div class="panel">
+        <h2 class="h-section">Збережені раціони</h2>
+        <div id="saved-output"></div>
+      </div>
+      <div class="panel">
+        <h2 class="h-section">Встановити на телефон</h2>
+        <p class="muted small">DietOpt — це веб-застосунок (PWA): його можна додати на головний екран і користуватися навіть без інтернету.</p>
+        <button class="btn btn--primary" id="install-btn" type="button" hidden>Встановити застосунок</button>
+        <ul class="steps-list">
+          <li><b>iPhone (Safari):</b> кнопка «Поділитися» → «На екран “Додому”».</li>
+          <li><b>Android (Chrome):</b> меню ⋮ → «Додати на головний екран» або «Встановити застосунок».</li>
+          <li><b>Комп'ютер (Chrome / Edge):</b> значок встановлення праворуч в адресному рядку.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h2 class="h-section">AI-рецепти (необов'язково)</h2>
+        <p class="muted small">Прості рецепти генеруються й без AI. Якщо хочете рецепти від Google Gemini — вставте свій безкоштовний ключ з <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>. Ключ зберігається лише у вашому браузері.</p>
+        <form id="ai-form" class="form">
+          <label class="field"><span class="label">Gemini API key</span>
+            <input name="key" type="password" autocomplete="off" placeholder="AIza…" spellcheck="false"></label>
+          <label class="field"><span class="label">Модель</span>
+            <select name="model">
+              <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite (швидка)</option>
+              <option value="gemini-3.8-flash">gemini-3.8-flash (розумніша)</option>
+              <option value="gemini-3.5-flash">gemini-3.5-flash</option>
+            </select></label>
+          <div class="row-gap">
+            <button class="btn btn--primary" type="submit">Зберегти</button>
+            <button class="btn btn--ghost" type="button" id="ai-clear">Видалити ключ</button>
+          </div>
+        </form>
+      </div>
+      <div class="panel">
+        <h2 class="h-section">Мої налаштування цін</h2>
+        <div id="overrides-output"></div>
+      </div>
+      <div class="panel panel--about">
+        <h2 class="h-section">Про проєкт</h2>
+        <p class="small">DietOpt — інформаційна система оптимізації раціону харчування студента. Кваліфікаційна робота бакалавра, Харківський національний університет імені В. Н. Каразіна, спеціальність 123 «Комп'ютерна інженерія». Автор — Литвин А. В., 2026.</p>
+        <dl class="facts small">
+          <dt>Норми</dt><dd>Формула Міффліна — Сан Жеора (1990), коефіцієнти активності PAL, ІМТ за ВООЗ</dd>
+          <dt>Алгоритм</dt><dd>Лінійне програмування, двофазний симплекс-метод, прямо в браузері</dd>
+          <dt>База</dt><dd id="about-db">—</dd>
+        </dl>
+        <p class="small muted">Система дає інформаційні рекомендації й не замінює консультацію лікаря чи дієтолога. Ціни орієнтовні — уточнюйте їх у розділі «Продукти».</p>
+        <button class="btn btn--ghost btn--danger" id="reset-all" type="button">Стерти всі мої дані</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<nav class="tabbar" aria-label="Розділи">
+  <a href="#/plan" data-nav="plan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18a9 9 0 0 1-18 0Z"/><path d="M8 8.5 11 6l3 2 4-4"/></svg><span>Раціон</span></a>
+  <a href="#/week" data-nav="week"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/></svg><span>Тиждень</span></a>
+  <a href="#/list" data-nav="list"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h14l-1.5 11.5a2 2 0 0 1-2 1.5h-7a2 2 0 0 1-2-1.5Z"/><path d="M9 7V5a3 3 0 0 1 6 0v2"/></svg><span>Покупки</span><i class="dot" data-count-list hidden></i></a>
+  <a href="#/foods" data-nav="foods"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>Продукти</span></a>
+  <a href="#/more" data-nav="more"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg><span>Ще</span></a>
+</nav>
+
+<dialog id="dlg" class="dialog"></dialog>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script type="module" src="js/app.js"></script>
+<noscript><p style="padding:2rem">Для роботи DietOpt увімкніть JavaScript.</p></noscript>
+</body>
+</html>
