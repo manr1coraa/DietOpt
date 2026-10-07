@@ -1,11 +1,11 @@
-/* sw.js — офлайн-режим DietOpt.
-   Після першого відкриття застосунок працює без інтернету.
-   Змініть VERSION після оновлення файлів, щоб користувачі отримали нову версію. */
-const VERSION = 'dietopt-v3.0.0';
+/* sw.js — DietOpt PWA offline mode.
+   Works offline once cached. Update VERSION on file updates. */
+const VERSION = 'dietopt-v4.0.0';
 const ASSETS = [
   './', 'index.html', 'manifest.webmanifest',
   'css/fonts.css', 'css/app.css',
   'js/app.js', 'js/optimizer.js', 'js/simplex.js', 'js/recipes.js',
+  'js/i18n.js', 'js/builder.js',
   'data/products.json',
   'fonts/Onest-cyrillic.woff2', 'fonts/Onest-latin.woff2',
   'fonts/JetBrainsMono-cyrillic.woff2', 'fonts/JetBrainsMono-latin.woff2',
@@ -22,7 +22,7 @@ self.addEventListener('activate', e => {
     .then(() => self.clients.claim()));
 });
 
-// Мережа першою (щоб бачити оновлення), кеш — якщо офлайн.
+// Network first, cache fallback for offline
 self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;

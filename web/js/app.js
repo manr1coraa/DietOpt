@@ -1,19 +1,29 @@
 /* ═══════════════════════════════════════════════════════════════
-   app.js — інтерфейс DietOpt v3 (без сервера, все на пристрої)
+   app.js — DietOpt v4
+   Multilingual (DE, EN, RU, UK), Multi-Currency (EUR, UAH),
+   Interactive Meal Builder, Simplex Optimizer, Week Plan & PWA
    ═══════════════════════════════════════════════════════════════ */
 
 import {
   calculateNorms, filterProducts, optimizeCandidates, optimizeBasic, buildWeek,
-  aggregateShopping, MEAL_ORDER, MEAL_NAMES,
+  aggregateShopping, MEAL_ORDER,
 } from './optimizer.js';
 import { buildDishes, fmtAmount, shortName, geminiRecipes, miniMarkdown } from './recipes.js';
+import {
+  currentLang, currentCurrency, setLanguage, setCurrency,
+  t, fmtCost, fmtInt, getFoodName, getCatName,
+  MEAL_NAMES_I18N, DAY_NAMES_I18N, ALLERGY_CHIPS_I18N,
+} from './i18n.js';
+import {
+  getInitialBuilderState, saveBuilderState, calcDayTotals,
+  calcItemNutrition, convertBuilderToPlanMenu, GERMAN_PRESETS, ALL_PRESETS,
+} from './builder.js';
 
-/* ─── Утиліти ───────────────────────────────────────────────── */
+/* ─── DOM Helpers ───────────────────────────────────────────── */
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const uah = v => `${(Math.round(v * 100) / 100).toLocaleString('uk-UA', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} грн`;
-const int = v => Math.round(v).toLocaleString('uk-UA');
+const lc = s => String(s || '').toLowerCase();
 const nextFrame = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 16)));
 
 const mem = {};
@@ -24,9 +34,9 @@ const store = {
 };
 
 function toast(msg) {
-  const t = $('#toast');
-  t.textContent = msg; t.hidden = false;
-  clearTimeout(toast._t); toast._t = setTimeout(() => { t.hidden = true; }, 2600);
+  const tEl = $('#toast');
+  tEl.textContent = msg; tEl.hidden = false;
+  clearTimeout(toast._t); toast._t = setTimeout(() => { tEl.hidden = true; }, 2600);
 }
 
 const ICON = {
@@ -46,62 +56,193 @@ const ICON = {
   cal: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>',
 };
 
-const ALLERGY_CHIPS = [
-  ['молоко', 'Молочне'], ['глютен', 'Глютен'], ['горіхи', 'Горіхи'], ['яйця', 'Яйця'], ['риба', 'Риба'],
-  ['морепродукти', 'Морепродукти'], ['соя', 'Соя'], ['цитрусові', 'Цитрусові'], ['гриби', 'Гриби'], ['свинина', 'Свинина'],
-];
-const DAY_NAMES = ['Понеділок', 'Вівторок', 'Середа', 'Четвер', "П'ятниця", 'Субота', 'Неділя'];
-
-/* ─── Стан ──────────────────────────────────────────────────── */
+/* ─── Global State ──────────────────────────────────────────── */
 const S = {
-  data: null, cats: {}, profile: null, norms: null,
-  candidates: [], variant: 0, basic: null, view: 'opt', seed: Date.now(),
-  banned: store.get('banned', []), prices: store.get('prices', {}),
+  data: null,
+  cats: {},
+  productsMap: new Map(),
+  profile: null,
+  norms: null,
+  candidates: [],
+  variant: 0,
+  basic: null,
+  view: 'opt',
+  seed: Date.now(),
+  banned: store.get('banned', []),
+  prices: store.get('prices', {}),
   list: store.get('list', { items: [], source: '' }),
-  saved: store.get('saved', []), ai: store.get('ai', { key: '', model: 'gemini-3.5-flash-lite' }),
-  week: null, aiText: null,
+  saved: store.get('saved', []),
+  ai: store.get('ai', { key: '', model: 'gemini-2.5-flash-lite' }),
+  week: null,
+  aiText: null,
+  builder: getInitialBuilderState(),
+  currency: currentCurrency,
+  lang: currentLang,
 };
+
 const current = () => (S.view === 'basic' && S.basic ? S.basic : S.candidates[S.variant]);
 
-/* ─── Роутер ────────────────────────────────────────────────── */
-const PAGES = ['plan', 'week', 'list', 'foods', 'more'];
+/* ─── Router ────────────────────────────────────────────────── */
+const PAGES = ['plan', 'builder', 'week', 'list', 'foods', 'more'];
 function route() {
   const [path, query] = location.hash.replace(/^#\/?/, '').split('?');
   const page = PAGES.includes(path) ? path : 'plan';
   $$('.page').forEach(p => { p.hidden = p.dataset.page !== page; });
-  $$('[data-nav]').forEach(a => { if (a.dataset.nav === page) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
-  if (page === 'list') renderList();
-  if (page === 'foods') renderFoods();
-  if (page === 'more') renderMore();
-  if (page === 'week') renderWeek();
+  $$('[data-nav]').forEach(a => {
+    if (a.dataset.nav === page) a.setAttribute('aria-current', 'page');
+    else a.removeAttribute('aria-current');
+  });
+
+  if (page === 'plan') {
+    if (S.candidates.length) renderPlan();
+  } else if (page === 'builder') {
+    renderBuilder();
+  } else if (page === 'week') {
+    renderWeek();
+  } else if (page === 'list') {
+    renderList();
+  } else if (page === 'foods') {
+    renderFoods();
+  } else if (page === 'more') {
+    renderMore();
+  }
+
   if (page === 'plan' && query) {
     const p = new URLSearchParams(query).get('p');
     if (p) {
       try {
         const prof = JSON.parse(decodeURIComponent(escape(atob(p.replace(/-/g, '+').replace(/_/g, '/')))));
         writeForm(prof); history.replaceState(null, '', '#/plan'); runPlan();
-      } catch { toast('Не вдалося відкрити посилання'); }
+      } catch { toast('Link could not be loaded'); }
     }
   }
   window.scrollTo({ top: 0 });
 }
 
-/* ─── Форма профілю ─────────────────────────────────────────── */
+/* ─── Language & Currency Handlers ──────────────────────────── */
+function updateStaticTexts() {
+  document.title = t('app_title');
+  const metaDesc = $('meta[name="description"]');
+  if (metaDesc) metaDesc.setAttribute('content', t('app_meta_desc'));
+
+  $$('[data-i18n]').forEach(el => {
+    const key = el.dataset.i18n;
+    el.textContent = t(key);
+  });
+
+  // Update inputs placeholder
+  const foodSearch = $('#food-search');
+  if (foodSearch) foodSearch.placeholder = t('foods_search_ph');
+
+  const extraAllergies = $('#allergies_extra');
+  if (extraAllergies) extraAllergies.placeholder = t('allergies_extra_ph');
+
+  // Re-render allergy chips
+  renderAllergyChips();
+  syncBudgetSlider();
+}
+
+function syncBudgetSlider() {
+  const range = $('#budget-input');
+  const out = $('#budget-out');
+  const scale = $('#range-scale');
+  if (!range) return;
+
+  if (S.currency === 'EUR') {
+    range.min = 3;
+    range.max = 30;
+    range.step = 0.5;
+    if (+range.value > 30 || +range.value < 3) range.value = 8;
+    out.textContent = fmtCost(+range.value, 'EUR');
+    scale.innerHTML = '<span>3 €</span><span>8 €</span><span>15 €</span><span>30 €</span>';
+  } else {
+    range.min = 50;
+    range.max = 1000;
+    range.step = 10;
+    if (+range.value < 50) range.value = 200;
+    out.textContent = fmtCost(+range.value, 'UAH');
+    scale.innerHTML = '<span>50</span><span>350</span><span>700</span><span>1000 грн</span>';
+  }
+}
+
+function initLanguageAndCurrency() {
+  const langSel = $('#lang-select');
+  const currSel = $('#currency-select');
+  if (langSel) {
+    langSel.value = S.lang;
+    langSel.addEventListener('change', e => {
+      setLanguage(e.target.value);
+      S.lang = e.target.value;
+      updateStaticTexts();
+      route();
+      toast(t('toast_prices_saved'));
+    });
+  }
+  if (currSel) {
+    currSel.value = S.currency;
+    currSel.addEventListener('change', e => {
+      setCurrency(e.target.value);
+      S.currency = e.target.value;
+      syncBudgetSlider();
+      if (S.profile) {
+        S.profile.budget = +$('#budget-input').value;
+        S.profile.currency = S.currency;
+        runPlan({ newSeed: false });
+      }
+      route();
+      toast(t('toast_prices_saved'));
+    });
+  }
+}
+
+/* ─── Profile Form ──────────────────────────────────────────── */
+function renderAllergyChips() {
+  const chipsEl = $('#allergy-chips');
+  if (!chipsEl) return;
+  const chipsList = ALLERGY_CHIPS_I18N[S.lang] || ALLERGY_CHIPS_I18N.de;
+  const currentChecked = S.profile?.allergy_chips || [];
+
+  chipsEl.innerHTML = chipsList.map(([v, l]) => {
+    const pressed = currentChecked.includes(v);
+    return `<button type="button" class="chip chip--warn" data-allergy="${v}" aria-pressed="${pressed}">${l}</button>`;
+  }).join('');
+}
+
 function initForm() {
-  const chips = $('#allergy-chips');
-  chips.innerHTML = ALLERGY_CHIPS.map(([v, l]) => `<button type="button" class="chip chip--warn" data-allergy="${v}" aria-pressed="false">${l}</button>`).join('');
-  chips.addEventListener('click', e => {
+  renderAllergyChips();
+  const chipsEl = $('#allergy-chips');
+  chipsEl.addEventListener('click', e => {
     const b = e.target.closest('[data-allergy]'); if (!b) return;
     b.setAttribute('aria-pressed', b.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
   });
+
   const f = $('#profile-form');
+  const range = $('#budget-input');
   const out = $('#budget-out');
-  const sync = () => { out.textContent = `${f.budget.value} грн`; };
-  f.budget.addEventListener('input', sync);
-  f.addEventListener('submit', e => { e.preventDefault(); runPlan(); });
+
+  range.addEventListener('input', () => {
+    out.textContent = fmtCost(+range.value, S.currency);
+  });
+
+  f.addEventListener('submit', e => {
+    e.preventDefault();
+    runPlan();
+  });
+
   const saved = store.get('profile', null);
-  if (saved) writeForm(saved);
-  sync();
+  if (saved) {
+    writeForm(saved);
+  } else {
+    // Default profile for Germany
+    const def = {
+      gender: 'male', age: 25, height: 178, weight: 75,
+      activity_level: 'light', goal: 'maintain',
+      budget: S.currency === 'EUR' ? 8 : 200,
+      diet_type: 'standard', allergy_chips: [], allergies_extra: '',
+      allergies: '', currency: S.currency
+    };
+    writeForm(def);
+  }
 }
 
 function readForm() {
@@ -109,25 +250,44 @@ function readForm() {
   const chips = $$('#allergy-chips [aria-pressed="true"]').map(b => b.dataset.allergy);
   const extra = f.allergies_extra.value.split(',').map(s => s.trim()).filter(Boolean);
   return {
-    gender: f.gender.value, age: +f.age.value, height: +f.height.value, weight: +f.weight.value,
-    activity_level: f.activity_level.value, goal: f.goal.value, budget: +f.budget.value,
-    diet_type: f.diet_type.value, allergy_chips: chips, allergies_extra: f.allergies_extra.value.trim(),
+    gender: f.gender.value,
+    age: +f.age.value,
+    height: +f.height.value,
+    weight: +f.weight.value,
+    activity_level: f.activity_level.value,
+    goal: f.goal.value,
+    budget: +f.budget.value,
+    currency: S.currency,
+    diet_type: f.diet_type.value,
+    allergy_chips: chips,
+    allergies_extra: f.allergies_extra.value.trim(),
     allergies: [...chips, ...extra].join(', '),
   };
 }
 
 function writeForm(p) {
   const f = $('#profile-form');
-  ['age', 'height', 'weight', 'budget', 'activity_level'].forEach(k => { if (p[k] != null) f[k].value = p[k]; });
-  ['gender', 'goal', 'diet_type'].forEach(k => { const r = f.querySelector(`[name="${k}"][value="${p[k]}"]`); if (r) r.checked = true; });
+  ['age', 'height', 'weight', 'activity_level'].forEach(k => { if (p[k] != null) f[k].value = p[k]; });
+  ['gender', 'goal', 'diet_type'].forEach(k => {
+    const r = f.querySelector(`[name="${k}"][value="${p[k]}"]`);
+    if (r) r.checked = true;
+  });
+  if (p.budget != null) f.budget.value = p.budget;
   f.allergies_extra.value = p.allergies_extra || '';
-  $$('#allergy-chips [data-allergy]').forEach(b => b.setAttribute('aria-pressed', (p.allergy_chips || []).includes(b.dataset.allergy) ? 'true' : 'false'));
-  $('#budget-out').textContent = `${f.budget.value} грн`;
+
+  $$('#allergy-chips [data-allergy]').forEach(b => {
+    b.setAttribute('aria-pressed', (p.allergy_chips || []).includes(b.dataset.allergy) ? 'true' : 'false');
+  });
+  $('#budget-out').textContent = fmtCost(+f.budget.value, S.currency);
 }
 
 function validate(p) {
   const f = $('#profile-form');
-  const rules = [['age', 14, 80, 'Вік — від 14 до 80 років'], ['height', 140, 220, 'Зріст — від 140 до 220 см'], ['weight', 40, 200, 'Вага — від 40 до 200 кг']];
+  const rules = [
+    ['age', 14, 80, 'Age must be between 14 and 80'],
+    ['height', 140, 220, 'Height must be between 140 and 220 cm'],
+    ['weight', 40, 200, 'Weight must be between 40 and 200 kg']
+  ];
   for (const [k, lo, hi, msg] of rules) {
     const bad = !(p[k] >= lo && p[k] <= hi);
     f[k].setAttribute('aria-invalid', bad ? 'true' : 'false');
@@ -136,57 +296,70 @@ function validate(p) {
   return null;
 }
 
-/* ─── Основний розрахунок ───────────────────────────────────── */
+/* ─── Plan Calculation ──────────────────────────────────────── */
 async function runPlan({ keepVariant = false, newSeed = true } = {}) {
   const p = readForm();
   const err = validate(p);
   const errEl = $('#form-error');
-  errEl.hidden = !err; errEl.textContent = err || '';
+  errEl.hidden = !err;
+  errEl.textContent = err || '';
   if (err) return;
+
   const btn = $('#run-btn');
   btn.classList.add('is-loading');
   await nextFrame();
+
   try {
-    S.profile = p; store.set('profile', p);
+    S.profile = p;
+    store.set('profile', p);
     S.norms = calculateNorms(p);
     if (newSeed) S.seed = Date.now();
-    const products = filterProducts(S.data.products, p, { bannedIds: S.banned, priceOverrides: S.prices });
+
+    const products = filterProducts(S.data.products, p, {
+      bannedIds: S.banned,
+      priceOverrides: S.prices,
+      currency: S.currency,
+    });
+
     S.candidates = optimizeCandidates(products, p, S.norms, S.seed);
     S.basic = S.candidates.length ? optimizeBasic(products, p, S.norms, S.seed) : null;
     if (!keepVariant) S.variant = 0;
     S.variant = Math.min(S.variant, Math.max(0, S.candidates.length - 1));
     S.view = 'opt'; S.aiText = null; S.week = null;
+
     if (!S.candidates.length) {
-      const probe = optimizeCandidates(products, { ...p, budget: 100000 }, S.norms, S.seed);
+      const probe = optimizeCandidates(products, { ...p, budget: 10000 }, S.norms, S.seed);
       S.minCost = probe[0]?.total_cost ?? null;
     }
     renderPlan();
     if (matchMedia('(max-width: 960px)').matches) $('#results').scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (e) {
     console.error(e);
-    errEl.hidden = false; errEl.textContent = 'Сталася помилка під час розрахунку. Спробуйте ще раз.';
+    errEl.hidden = false;
+    errEl.textContent = 'Optimization error. Please check parameters.';
   } finally {
     btn.classList.remove('is-loading');
   }
 }
 
-/* ─── Рендер раціону ────────────────────────────────────────── */
+/* ─── Plan Render ───────────────────────────────────────────── */
 function renderPlan() {
   const out = $('#plan-output');
-  $('#plan-empty').hidden = true; out.hidden = false;
+  $('#plan-empty').hidden = true;
+  out.hidden = false;
   const n = S.norms, p = S.profile;
 
   if (!S.candidates.length) {
     const min = S.minCost;
     out.innerHTML = `
       <div class="card">
-        <p class="eyebrow">Розв'язку немає</p>
-        <h2 class="h-page" style="margin:.25rem 0 .75rem">Бюджету ${uah(p.budget)} замало для ваших норм</h2>
-        <p class="muted">Алгоритм перебрав усі шаблони меню, але жоден не вкладається в бюджет при дотриманні ${int(n.target_calories)} ккал і норм білків, жирів та вуглеводів.</p>
-        ${min ? `<div class="notice notice--ok" style="margin-top:1rem"><span>Мінімальна вартість повноцінного раціону для вас — <b class="num">${uah(min)}</b> на день.</span></div>` : `<div class="notice notice--warn" style="margin-top:1rem">Забагато обмежень: спробуйте зняти частину алергенів або змінити тип харчування.</div>`}
+        <p class="eyebrow">${t('notice_relaxed')}</p>
+        <h2 class="h-page" style="margin:.25rem 0 .75rem">${t('no_solution_title', fmtCost(p.budget))}</h2>
+        <p class="muted">${t('no_solution_lead', fmtInt(n.target_calories))}</p>
+        ${min ? `<div class="notice notice--ok" style="margin-top:1rem"><span>${t('no_solution_min', fmtCost(min))}</span></div>` : ''}
         <div class="actions" style="margin-top:1rem">
-          ${min ? `<button class="btn btn--primary" data-act="set-budget" data-v="${Math.ceil(min / 10) * 10}">Встановити бюджет ${Math.ceil(min / 10) * 10} грн</button>` : ''}
-          <button class="btn" data-act="edit">Змінити профіль</button>
+          ${min ? `<button class="btn btn--primary" data-act="set-budget" data-v="${Math.ceil(min)}">${t('set_budget_btn', fmtCost(Math.ceil(min)))}</button>` : ''}
+          <button class="btn" data-act="edit">${t('edit_profile_btn')}</button>
         </div>
       </div>`;
     return;
@@ -195,82 +368,102 @@ function renderPlan() {
   const r = current();
   const opt = S.candidates[S.variant];
   const total = S.candidates.length;
-  const dishes = buildDishes(r.menu);
+  const dishes = buildDishes(r.menu, S.lang);
   const savings = S.basic ? S.basic.total_cost - opt.total_cost : 0;
-  const goalText = { loss: 'схуднення', maintain: 'підтримки ваги', gain: 'набору маси' }[p.goal];
+  const goalText = { loss: t('goal_loss'), maintain: t('goal_maintain'), gain: t('goal_gain') }[p.goal];
 
   out.innerHTML = `
     <div class="result-head">
       <div>
-        <p class="eyebrow">Меню на день · ${esc(r.template)}</p>
-        <h2 class="h-page">${uah(r.total_cost)} за ${int(r.total_calories)} ккал</h2>
+        <p class="eyebrow">${t('menu_for_day')} · ${esc(r.template)}</p>
+        <h2 class="h-page">${fmtCost(r.total_cost)} · ${fmtInt(r.total_calories)} ${t('kpi_kcal')}</h2>
       </div>
       <div class="row-gap no-print">
-        <div class="tabs" role="tablist" aria-label="Тип раціону">
-          <button role="tab" aria-selected="${S.view === 'opt'}" data-act="view" data-v="opt">Найдешевший <span class="num">${uah(opt.total_cost)}</span></button>
-          <button role="tab" aria-selected="${S.view === 'basic'}" data-act="view" data-v="basic" ${S.basic ? '' : 'disabled'}>Звичайний <span class="num">${S.basic ? uah(S.basic.total_cost) : '—'}</span></button>
+        <div class="tabs" role="tablist" aria-label="Varianten">
+          <button role="tab" aria-selected="${S.view === 'opt'}" data-act="view" data-v="opt">${t('tab_cheapest')} <span class="num">${fmtCost(opt.total_cost)}</span></button>
+          <button role="tab" aria-selected="${S.view === 'basic'}" data-act="view" data-v="basic" ${S.basic ? '' : 'disabled'}>${t('tab_standard')} <span class="num">${S.basic ? fmtCost(S.basic.total_cost) : '—'}</span></button>
         </div>
       </div>
     </div>
 
-    ${opt.relaxed ? `<div class="notice notice--warn"><span>Для ваших параметрів довелося трохи <b>послабити обмеження</b> (більші порції, ширший допуск КБЖУ) — строгий розв'язок не існує.</span></div>` : ''}
+    ${opt.relaxed ? `<div class="notice notice--warn"><span>${t('notice_relaxed')}</span></div>` : ''}
 
     <div class="kpis">
-      <div class="kpi kpi--accent"><span class="kpi__label">Вартість на день</span><span class="kpi__value">${uah(r.total_cost)}</span><span class="kpi__sub">з бюджету ${uah(p.budget)}</span></div>
-      <div class="kpi"><span class="kpi__label">Калорії</span><span class="kpi__value">${int(r.total_calories)}<small>ккал</small></span><span class="kpi__sub">ціль ${int(n.target_calories)} для ${goalText}</span></div>
-      <div class="kpi"><span class="kpi__label">Економія</span><span class="kpi__value ${savings > 0 ? 'good' : ''}">${savings > 0 ? uah(savings) : '—'}</span><span class="kpi__sub">${savings > 0 ? `≈${int(savings * 30)} грн на місяць` : 'порівняно зі звичайним'}</span></div>
-      <div class="kpi"><span class="kpi__label">Білки</span><span class="kpi__value">${int(r.total_protein)}<small>г</small></span><span class="kpi__sub">норма ${int(n.protein_min)}–${int(n.protein_max)} г</span></div>
+      <div class="kpi kpi--accent">
+        <span class="kpi__label">${t('kpi_day_cost')}</span>
+        <span class="kpi__value">${fmtCost(r.total_cost)}</span>
+        <span class="kpi__sub">${t('kpi_from_budget', fmtCost(p.budget))}</span>
+      </div>
+      <div class="kpi">
+        <span class="kpi__label">${t('kpi_calories')}</span>
+        <span class="kpi__value">${fmtInt(r.total_calories)}<small>${t('kpi_kcal')}</small></span>
+        <span class="kpi__sub">${t('kpi_goal_target', fmtInt(n.target_calories), goalText)}</span>
+      </div>
+      <div class="kpi">
+        <span class="kpi__label">${t('kpi_savings')}</span>
+        <span class="kpi__value ${savings > 0 ? 'good' : ''}">${savings > 0 ? fmtCost(savings) : '—'}</span>
+        <span class="kpi__sub">${savings > 0 ? t('kpi_savings_sub', fmtCost(savings * 30)) : t('kpi_savings_none')}</span>
+      </div>
+      <div class="kpi">
+        <span class="kpi__label">${t('kpi_protein')}</span>
+        <span class="kpi__value">${fmtInt(r.total_protein)}<small>g</small></span>
+        <span class="kpi__sub">${t('kpi_protein_sub', fmtInt(n.protein_min), fmtInt(n.protein_max))}</span>
+      </div>
     </div>
 
     <div class="card">
       <div class="card__head">
-        <h3 class="h-section">Меню</h3>
+        <h3 class="h-section">${t('menu_section')}</h3>
         ${S.view === 'opt' ? `<div class="variant no-print">
-          <button class="icon-btn" data-act="variant" data-v="-1" aria-label="Попередній варіант" ${S.variant === 0 ? 'disabled' : ''}>${ICON.prev}</button>
-          <span class="num">варіант ${S.variant + 1}/${total}</span>
-          <button class="icon-btn" data-act="variant" data-v="1" aria-label="Інший варіант" ${S.variant >= total - 1 ? 'disabled' : ''}>${ICON.next}</button>
+          <button class="icon-btn" data-act="variant" data-v="-1" aria-label="${t('btn_prev_variant')}" ${S.variant === 0 ? 'disabled' : ''}>${ICON.prev}</button>
+          <span class="num">${t('variant_text', S.variant + 1, total)}</span>
+          <button class="icon-btn" data-act="variant" data-v="1" aria-label="${t('btn_next_variant')}" ${S.variant >= total - 1 ? 'disabled' : ''}>${ICON.next}</button>
         </div>` : ''}
       </div>
       <div class="meals">${MEAL_ORDER.map(m => mealHTML(m, r.menu.filter(i => i.meal === m), dishes[m])).join('')}</div>
-      <p class="xs muted" style="margin-top:.75rem">Натисніть × біля продукту, якщо не хочете його їсти — меню перерахується без нього.</p>
+      <p class="xs muted" style="margin-top:.75rem">${t('ban_hint')}</p>
     </div>
 
     <div class="actions no-print">
-      <button class="btn btn--primary" data-act="to-list">${ICON.cart} У список покупок</button>
-      <button class="btn" data-act="share">${ICON.share} Поділитися</button>
-      <button class="btn" data-act="save">${ICON.save} Зберегти</button>
-      <button class="btn" data-act="print">${ICON.print} Друк / PDF</button>
+      <button class="btn btn--primary" data-act="to-list">${ICON.cart} ${t('btn_to_list')}</button>
+      <button class="btn" data-act="share">${ICON.share} ${t('btn_share')}</button>
+      <button class="btn" data-act="save">${ICON.save} ${t('btn_save')}</button>
+      <button class="btn" data-act="print">${ICON.print} ${t('btn_print')}</button>
     </div>
 
     <div class="card">
-      <div class="card__head"><h3 class="h-section">Баланс КБЖУ</h3><span class="xs muted">пунктир — ваша норма</span></div>
+      <div class="card__head">
+        <h3 class="h-section">${t('macros_balance')}</h3>
+        <span class="xs muted">${t('macros_legend')}</span>
+      </div>
       ${macrosHTML(r, n)}
     </div>
 
     <div class="card">
       <div class="card__head">
-        <h3 class="h-section">Що приготувати</h3>
-        <button class="btn btn--sm no-print" data-act="ai">${ICON.spark} Рецепти від AI</button>
+        <h3 class="h-section">${t('recipes_section')}</h3>
+        <button class="btn btn--sm no-print" data-act="ai">${ICON.spark} ${t('recipes_ai_btn')}</button>
       </div>
-      <div id="ai-out">${S.aiText ? `<div class="ai-box">${miniMarkdown(S.aiText.text)}<p class="xs muted">Згенеровано ${esc(S.aiText.model)}</p></div>` : `<div class="dishes">${MEAL_ORDER.filter(m => dishes[m]).map(m => dishHTML(m, dishes[m])).join('')}</div>`}</div>
+      <div id="ai-out">
+        ${S.aiText ? `<div class="ai-box">${miniMarkdown(S.aiText.text)}<p class="xs muted">Model: ${esc(S.aiText.model)}</p></div>` : `<div class="dishes">${MEAL_ORDER.filter(m => dishes[m]).map(m => dishHTML(m, dishes[m])).join('')}</div>`}
+      </div>
     </div>
 
     ${S.basic ? compareHTML(opt, S.basic) : ''}
 
     <div class="card">
       <details class="more" style="border:0;padding:0">
-        <summary>Ваші норми й методика розрахунку</summary>
+        <summary>${t('more_norms_title')}</summary>
         <div class="norms">
-          <div class="norm"><b>${int(n.bmr)}</b><span>BMR, базовий обмін, ккал</span></div>
-          <div class="norm"><b>${int(n.tdee)}</b><span>TDEE, витрата за добу, ккал</span></div>
-          <div class="norm"><b>${int(n.target_calories)}</b><span>Цільова калорійність</span></div>
-          <div class="norm"><b>${n.bmi}</b><span>ІМТ — ${esc(n.bmi_status.toLowerCase())}</span></div>
-          <div class="norm"><b>${int(n.fat_min)}–${int(n.fat_max)} г</b><span>Жири</span></div>
-          <div class="norm"><b>${int(n.carbs_min)}–${int(n.carbs_max)} г</b><span>Вуглеводи</span></div>
-          <div class="norm"><b>${(n.water_ml / 1000).toFixed(1)} л</b><span>Вода (35 мл × кг)</span></div>
-          <div class="norm"><b>${r.solve_time_ms ?? '—'} мс</b><span>Час оптимізації</span></div>
+          <div class="norm"><b>${fmtInt(n.bmr)}</b><span>${t('norm_bmr_sub')}</span></div>
+          <div class="norm"><b>${fmtInt(n.tdee)}</b><span>${t('norm_tdee_sub')}</span></div>
+          <div class="norm"><b>${fmtInt(n.target_calories)}</b><span>${t('norm_target_sub')}</span></div>
+          <div class="norm"><b>${n.bmi}</b><span>${t('norm_bmi_sub', esc(n.bmi_status))}</span></div>
+          <div class="norm"><b>${fmtInt(n.fat_min)}–${fmtInt(n.fat_max)} g</b><span>${t('kpi_fat')}</span></div>
+          <div class="norm"><b>${fmtInt(n.carbs_min)}–${fmtInt(n.carbs_max)} g</b><span>${t('kpi_carbs')}</span></div>
+          <div class="norm"><b>${(n.water_ml / 1000).toFixed(1)} L</b><span>${t('norm_water_sub')}</span></div>
+          <div class="norm"><b>${r.solve_time_ms ?? '—'} ms</b><span>${t('norm_solve_time')}</span></div>
         </div>
-        <p class="xs muted" style="margin-top:.75rem">BMR — формула Міффліна — Сан Жеора (1990); TDEE = BMR × коефіцієнт активності (PAL). Меню підбирається задачею лінійного програмування: мінімізувати вартість за умов калорійність ±10%, білки/жири/вуглеводи в межах норми ±20%, порції — у реалістичних межах. Рекомендації інформаційні й не замінюють консультацію лікаря.</p>
       </details>
     </div>`;
 }
@@ -279,26 +472,39 @@ function mealHTML(meal, items, dish) {
   if (!items.length) return '';
   const kcal = items.reduce((s, i) => s + i.calories, 0);
   const cost = items.reduce((s, i) => s + i.cost, 0);
+  const mealName = (MEAL_NAMES_I18N[S.lang] || MEAL_NAMES_I18N.de)[meal] || meal;
+
   return `<section class="meal">
     <header class="meal__head">
-      <div class="meal__title"><span class="meal__icon">${ICON[meal]}</span>
-        <div style="min-width:0"><div class="meal__name">${MEAL_NAMES[meal]}</div>${dish ? `<div class="meal__dish">${esc(dish.title)}</div>` : ''}</div></div>
-      <div class="meal__meta">${int(kcal)} ккал<br>${uah(cost)}</div>
+      <div class="meal__title">
+        <span class="meal__icon">${ICON[meal]}</span>
+        <div style="min-width:0">
+          <div class="meal__name">${mealName}</div>
+          ${dish ? `<div class="meal__dish">${esc(dish.title)}</div>` : ''}
+        </div>
+      </div>
+      <div class="meal__meta">${fmtInt(kcal)} kcal<br>${fmtCost(cost)}</div>
     </header>
     <ul class="items">${items.map(i => `
       <li class="item">
-        <div><div class="item__name">${esc(shortName(i.name))}</div>
-          <div class="item__macro">${int(i.calories)} ккал · Б ${i.protein} · Ж ${i.fat} · В ${i.carbs}</div></div>
-        <div class="item__amt">${esc(fmtAmount(i))}<small>${uah(i.cost)}</small></div>
-        <button class="item__x no-print" data-act="ban" data-id="${i.id}" aria-label="Виключити ${esc(i.name)}" title="Не їм цей продукт">${ICON.x}</button>
+        <div>
+          <div class="item__name">${esc(shortName(i.name, i, S.lang))}</div>
+          <div class="item__macro">${fmtInt(i.calories)} kcal · P ${i.protein}g · F ${i.fat}g · C ${i.carbs}g</div>
+        </div>
+        <div class="item__amt">${esc(fmtAmount(i, S.lang))}<small>${fmtCost(i.cost)}</small></div>
+        <button class="item__x no-print" data-act="ban" data-id="${i.id}" aria-label="Exclude ${esc(i.name)}" title="Exclude">${ICON.x}</button>
       </li>`).join('')}</ul>
   </section>`;
 }
 
 function dishHTML(meal, d) {
-  return `<article class="dish"><div class="dish__meal">${MEAL_NAMES[meal]}</div>
-    <h4 class="dish__title">${esc(d.title)}</h4><span class="dish__time">≈ ${d.time} хв</span>
-    <ol>${d.steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol></article>`;
+  const mealName = (MEAL_NAMES_I18N[S.lang] || MEAL_NAMES_I18N.de)[meal] || meal;
+  return `<article class="dish">
+    <div class="dish__meal">${mealName}</div>
+    <h4 class="dish__title">${esc(d.title)}</h4>
+    <span class="dish__time">≈ ${d.time} min</span>
+    <ol>${d.steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol>
+  </article>`;
 }
 
 function macrosHTML(r, n) {
@@ -306,21 +512,35 @@ function macrosHTML(r, n) {
   const sum = kP + kF + kC || 1;
   const C = 2 * Math.PI * 52;
   let off = 0;
-  const seg = (v, col) => { const len = v / sum * C; const s = `<circle cx="66" cy="66" r="52" fill="none" stroke="${col}" stroke-width="16" stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-off}"/>`; off += len; return s; };
+  const seg = (v, col) => {
+    const len = v / sum * C;
+    const s = `<circle cx="66" cy="66" r="52" fill="none" stroke="${col}" stroke-width="16" stroke-dasharray="${len} ${C - len}" stroke-dashoffset="${-off}"/>`;
+    off += len;
+    return s;
+  };
   const bar = (label, val, min, max, col) => {
     const scale = Math.max(max * 1.25, val * 1.05);
-    return `<div><div class="bar__top"><span><i class="sw" style="background:${col}"></i>${label}</span><span class="num">${int(val)} г · норма ${int(min)}–${int(max)}</span></div>
-      <div class="bar__track"><span class="bar__range" style="left:${min / scale * 100}%;width:${(max - min) / scale * 100}%"></span><span class="bar__fill" style="width:${Math.min(100, val / scale * 100)}%;background:${col}"></span></div></div>`;
+    return `<div>
+      <div class="bar__top">
+        <span><i class="sw" style="background:${col}"></i>${label}</span>
+        <span class="num">${fmtInt(val)} g · ${fmtInt(min)}–${fmtInt(max)} g</span>
+      </div>
+      <div class="bar__track">
+        <span class="bar__range" style="left:${min / scale * 100}%;width:${(max - min) / scale * 100}%"></span>
+        <span class="bar__fill" style="width:${Math.min(100, val / scale * 100)}%;background:${col}"></span>
+      </div>
+    </div>`;
   };
+
   return `<div class="macros">
-    <div class="donut" role="img" aria-label="Частка енергії: білки ${Math.round(kP / sum * 100)}%, жири ${Math.round(kF / sum * 100)}%, вуглеводи ${Math.round(kC / sum * 100)}%">
+    <div class="donut" role="img" aria-label="Energy: Protein ${Math.round(kP / sum * 100)}%, Fat ${Math.round(kF / sum * 100)}%, Carbs ${Math.round(kC / sum * 100)}%">
       <svg viewBox="0 0 132 132"><circle cx="66" cy="66" r="52" fill="none" stroke="var(--color-surface-2)" stroke-width="16"/>${seg(kP, 'var(--c-protein)')}${seg(kF, 'var(--c-fat)')}${seg(kC, 'var(--c-carbs)')}</svg>
-      <div class="donut__c"><b>${Math.round(kP / sum * 100)}/${Math.round(kF / sum * 100)}/${Math.round(kC / sum * 100)}</b><span>% Б / Ж / В</span></div>
+      <div class="donut__c"><b>${Math.round(kP / sum * 100)}/${Math.round(kF / sum * 100)}/${Math.round(kC / sum * 100)}</b><span>% P / F / C</span></div>
     </div>
     <div class="bars">
-      ${bar('Білки', r.total_protein, n.protein_min, n.protein_max, 'var(--c-protein)')}
-      ${bar('Жири', r.total_fat, n.fat_min, n.fat_max, 'var(--c-fat)')}
-      ${bar('Вуглеводи', r.total_carbs, n.carbs_min, n.carbs_max, 'var(--c-carbs)')}
+      ${bar(t('kpi_protein'), r.total_protein, n.protein_min, n.protein_max, 'var(--c-protein)')}
+      ${bar(t('kpi_fat'), r.total_fat, n.fat_min, n.fat_max, 'var(--c-fat)')}
+      ${bar(t('kpi_carbs'), r.total_carbs, n.carbs_min, n.carbs_max, 'var(--c-carbs)')}
     </div></div>`;
 }
 
@@ -328,154 +548,509 @@ function compareHTML(o, b) {
   const d = (x, y, u = '') => { const v = Math.round((x - y) * 10) / 10; return `${v > 0 ? '+' : ''}${v}${u}`; };
   const pct = b.total_cost > 0 ? Math.round((1 - o.total_cost / b.total_cost) * 100) : 0;
   return `<div class="card">
-    <div class="card__head"><h3 class="h-section">Найдешевший vs звичайний</h3>${pct > 0 ? `<span class="tag tag--ok">дешевше на ${pct}%</span>` : ''}</div>
-    <p class="small muted" style="margin-bottom:.75rem">«Звичайний» — реалістичний кошик, який студент купив би, витративши майже весь бюджет. Норми КБЖУ в обох однакові.</p>
+    <div class="card__head">
+      <h3 class="h-section">${t('compare_title')}</h3>
+      ${pct > 0 ? `<span class="tag tag--ok">${t('compare_tag', pct)}</span>` : ''}
+    </div>
+    <p class="small muted" style="margin-bottom:.75rem">${t('compare_sub')}</p>
     <div style="overflow-x:auto"><table class="compare">
-      <thead><tr><th>Показник</th><th>Найдешевший</th><th>Звичайний</th><th>Різниця</th></tr></thead>
+      <thead><tr><th>${t('metric_name')}</th><th>${t('metric_cheapest')}</th><th>${t('metric_standard')}</th><th>${t('metric_diff')}</th></tr></thead>
       <tbody>
-        <tr><td>Вартість</td><td class="good">${uah(o.total_cost)}</td><td>${uah(b.total_cost)}</td><td>${d(o.total_cost, b.total_cost, ' грн')}</td></tr>
-        <tr><td>Калорії</td><td>${int(o.total_calories)}</td><td>${int(b.total_calories)}</td><td>${d(o.total_calories, b.total_calories)}</td></tr>
-        <tr><td>Білки, г</td><td>${o.total_protein}</td><td>${b.total_protein}</td><td>${d(o.total_protein, b.total_protein)}</td></tr>
-        <tr><td>Жири, г</td><td>${o.total_fat}</td><td>${b.total_fat}</td><td>${d(o.total_fat, b.total_fat)}</td></tr>
-        <tr><td>Вуглеводи, г</td><td>${o.total_carbs}</td><td>${b.total_carbs}</td><td>${d(o.total_carbs, b.total_carbs)}</td></tr>
-        <tr><td>Продуктів</td><td>${o.menu.length}</td><td>${b.menu.length}</td><td>${o.menu.length - b.menu.length}</td></tr>
+        <tr><td>${t('kpi_day_cost')}</td><td class="good">${fmtCost(o.total_cost)}</td><td>${fmtCost(b.total_cost)}</td><td>${d(o.total_cost, b.total_cost, S.currency === 'EUR' ? ' €' : ' грн')}</td></tr>
+        <tr><td>${t('kpi_calories')}</td><td>${fmtInt(o.total_calories)}</td><td>${fmtInt(b.total_calories)}</td><td>${d(o.total_calories, b.total_calories)}</td></tr>
+        <tr><td>${t('kpi_protein')}, g</td><td>${o.total_protein}</td><td>${b.total_protein}</td><td>${d(o.total_protein, b.total_protein)}</td></tr>
+        <tr><td>${t('kpi_fat')}, g</td><td>${o.total_fat}</td><td>${b.total_fat}</td><td>${d(o.total_fat, b.total_fat)}</td></tr>
+        <tr><td>${t('kpi_carbs')}, g</td><td>${o.total_carbs}</td><td>${b.total_carbs}</td><td>${d(o.total_carbs, b.total_carbs)}</td></tr>
+        <tr><td>Foods</td><td>${o.menu.length}</td><td>${b.menu.length}</td><td>${o.menu.length - b.menu.length}</td></tr>
       </tbody></table></div>
   </div>`;
 }
 
-/* ─── Дії на сторінці раціону ───────────────────────────────── */
+/* ─── Plan Click Events ─────────────────────────────────────── */
 function onPlanClick(e) {
   const b = e.target.closest('[data-act]'); if (!b) return;
   const act = b.dataset.act;
   if (act === 'view') { S.view = b.dataset.v; S.aiText = null; renderPlan(); }
-  if (act === 'variant') { S.variant = Math.max(0, Math.min(S.candidates.length - 1, S.variant + +b.dataset.v)); S.aiText = null; renderPlan(); }
+  if (act === 'variant') {
+    S.variant = Math.max(0, Math.min(S.candidates.length - 1, S.variant + +b.dataset.v));
+    S.aiText = null; renderPlan();
+  }
   if (act === 'ban') {
     const id = +b.dataset.id;
-    const prod = S.data.products.find(p => p.id === id);
+    const prod = S.productsMap.get(id);
     if (!S.banned.includes(id)) S.banned.push(id);
     store.set('banned', S.banned);
-    toast(`«${shortName(prod?.n || '')}» виключено. Повернути можна в розділі «Ще».`);
+    toast(`${getFoodName(prod, S.lang)}: ${t('toast_excluded')}`);
     runPlan({ newSeed: false });
   }
-  if (act === 'to-list') addToList([current().menu], 'Раціон на день');
+  if (act === 'to-list') {
+    addToList([current().menu], t('menu_for_day'));
+  }
   if (act === 'share') sharePlan();
   if (act === 'save') savePlan();
   if (act === 'print') window.print();
   if (act === 'ai') runAI();
   if (act === 'edit') { $('#profile-form').scrollIntoView({ behavior: 'smooth' }); $('#profile-form').age.focus(); }
-  if (act === 'set-budget') { $('#profile-form').budget.value = b.dataset.v; runPlan(); }
-}
-
-function profileLink(p) {
-  const { allergies, ...rest } = p;
-  const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(rest)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  return `${location.origin}${location.pathname}#/plan?p=${b64}`;
-}
-
-function menuText(r) {
-  const lines = [`DietOpt — меню на день: ${uah(r.total_cost)}, ${int(r.total_calories)} ккал (Б ${int(r.total_protein)} / Ж ${int(r.total_fat)} / В ${int(r.total_carbs)})`];
-  MEAL_ORDER.forEach(m => {
-    const it = r.menu.filter(i => i.meal === m); if (!it.length) return;
-    lines.push('', MEAL_NAMES[m] + ':');
-    it.forEach(i => lines.push(`• ${shortName(i.name)} — ${fmtAmount(i)}`));
-  });
-  return lines.join('\n');
-}
-
-async function shareOrCopy({ title, text, url }) {
-  const full = url ? `${text}\n\n${url}` : text;
-  if (navigator.share) {
-    try { await navigator.share({ title, text, url }); return; } catch (e) { if (e.name === 'AbortError') return; }
-  }
-  try { await navigator.clipboard.writeText(full); toast('Скопійовано — вставте в месенджер'); }
-  catch {
-    const ta = document.createElement('textarea'); ta.value = full; document.body.append(ta); ta.select();
-    try { document.execCommand('copy'); toast('Скопійовано'); } catch { toast('Не вдалося скопіювати'); }
-    ta.remove();
-  }
+  if (act === 'set-budget') { $('#budget-input').value = b.dataset.v; runPlan(); }
 }
 
 function sharePlan() {
   const r = current();
-  shareOrCopy({ title: 'Моє меню з DietOpt', text: menuText(r) + '\n\nСклади своє за посиланням:', url: profileLink(S.profile) });
+  const mealNames = MEAL_NAMES_I18N[S.lang] || MEAL_NAMES_I18N.de;
+  const lines = [`DietOpt — ${t('menu_for_day')}: ${fmtCost(r.total_cost)}, ${fmtInt(r.total_calories)} kcal (P ${fmtInt(r.total_protein)}g / F ${fmtInt(r.total_fat)}g / C ${fmtInt(r.total_carbs)}g)`];
+  MEAL_ORDER.forEach(m => {
+    const it = r.menu.filter(i => i.meal === m); if (!it.length) return;
+    lines.push('', (mealNames[m] || m) + ':');
+    it.forEach(i => lines.push(`• ${shortName(i.name, i, S.lang)} — ${fmtAmount(i, S.lang)}`));
+  });
+  shareOrCopy({ title: 'DietOpt Meal Plan', text: lines.join('\n') });
 }
 
 function savePlan() {
   const r = current();
   const entry = {
-    id: Date.now(), date: new Date().toISOString(), profile: S.profile,
-    label: `${r.template} · ${uah(r.total_cost)}`, result: r,
+    id: Date.now(),
+    date: new Date().toISOString(),
+    profile: S.profile,
+    label: `${r.template} · ${fmtCost(r.total_cost)}`,
+    result: r,
   };
-  S.saved.unshift(entry); S.saved = S.saved.slice(0, 30);
+  S.saved.unshift(entry);
+  S.saved = S.saved.slice(0, 30);
   store.set('saved', S.saved);
-  toast('Раціон збережено в розділі «Ще»');
+  toast(t('toast_saved'));
 }
 
 async function runAI() {
   const box = $('#ai-out');
+  const mealNames = MEAL_NAMES_I18N[S.lang] || MEAL_NAMES_I18N.de;
   if (!S.ai.key) {
     openDialog(`<div class="dialog__body">
-      <h2 class="h-section">Рецепти від Google Gemini</h2>
-      <p class="small muted">Для AI-рецептів потрібен ваш безкоштовний ключ Gemini API. Отримати його можна за хвилину в <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>. Ключ зберігається лише в цьому браузері.</p>
-      <form method="dialog" class="form" id="ai-quick"><label class="field"><span class="label">API key</span><input name="key" type="password" placeholder="AIza…" required autocomplete="off"></label>
-      <div class="dialog__foot"><button class="btn btn--ghost" value="cancel" formnovalidate>Скасувати</button><button class="btn btn--primary" value="ok">Зберегти і згенерувати</button></div></form></div>`,
+      <h2 class="h-section">${t('ai_settings_title')}</h2>
+      <p class="small muted">${t('ai_settings_sub')}</p>
+      <form method="dialog" class="form" id="ai-quick">
+        <label class="field"><span class="label">Gemini API Key</span><input name="key" type="password" placeholder="AIza…" required autocomplete="off"></label>
+        <div class="dialog__foot"><button class="btn btn--ghost" value="cancel" formnovalidate>${t('cancel')}</button><button class="btn btn--primary" value="ok">${t('save')}</button></div>
+      </form></div>`,
       dlg => {
         $('#ai-quick', dlg).addEventListener('submit', ev => {
           const k = ev.target.key.value.trim();
-          if (ev.submitter?.value === 'ok' && k) { S.ai.key = k; store.set('ai', S.ai); setTimeout(runAI, 50); }
+          if (ev.submitter?.value === 'ok' && k) {
+            S.ai.key = k; store.set('ai', S.ai); setTimeout(runAI, 50);
+          }
         });
       });
     return;
   }
   const r = current();
-  box.innerHTML = `<div class="skel" style="height:220px"></div><p class="xs muted" style="margin-top:.5rem">Gemini складає рецепти… зазвичай 5–20 секунд</p>`;
+  box.innerHTML = `<div class="skel" style="height:220px"></div><p class="xs muted" style="margin-top:.5rem">Gemini AI is cooking recipes… (5–15s)</p>`;
   try {
-    S.aiText = await geminiRecipes({ apiKey: S.ai.key, model: S.ai.model, menu: r.menu, profile: S.profile, mealNames: MEAL_NAMES });
+    S.aiText = await geminiRecipes({
+      apiKey: S.ai.key, model: S.ai.model, menu: r.menu,
+      profile: S.profile, mealNames, lang: S.lang,
+    });
     renderPlan();
     $('#ai-out')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   } catch (e) {
-    const d = buildDishes(r.menu);
-    box.innerHTML = `<div class="notice notice--err" style="margin-bottom:.75rem"><span><b>AI недоступний:</b> ${esc(String(e.message).replace(/\.+$/, ''))}. Перевірте ключ у розділі «Ще». Нижче — офлайн-рецепти.</span></div>
+    const d = buildDishes(r.menu, S.lang);
+    box.innerHTML = `<div class="notice notice--err" style="margin-bottom:.75rem"><span><b>AI unavailable:</b> ${esc(String(e.message))}.</span></div>
       <div class="dishes">${MEAL_ORDER.filter(m => d[m]).map(m => dishHTML(m, d[m])).join('')}</div>`;
   }
 }
 
-/* ─── Тиждень ───────────────────────────────────────────────── */
+/* ─── Interactive Diet Builder (Baukasten) ──────────────────── */
+function renderBuilder() {
+  const dashboard = $('#builder-dashboard');
+  const mealsContainer = $('#builder-meals');
+  if (!dashboard || !mealsContainer) return;
+
+  const totals = calcDayTotals(S.builder, S.productsMap, S.currency, S.prices);
+  const targetNorms = S.norms || (S.profile ? calculateNorms(S.profile) : {
+    target_calories: 2200, protein_min: 120, protein_max: 160,
+    fat_min: 55, fat_max: 75, carbs_min: 220, carbs_max: 280,
+  });
+
+  const pKcal = Math.min(150, Math.round((totals.calories / targetNorms.target_calories) * 100));
+  const targetProtein = Math.round((targetNorms.protein_min + targetNorms.protein_max) / 2);
+  const pProt = Math.min(150, Math.round((totals.protein / targetProtein) * 100));
+  const targetFat = Math.round((targetNorms.fat_min + targetNorms.fat_max) / 2);
+  const pFat = Math.min(150, Math.round((totals.fat / targetFat) * 100));
+  const targetCarbs = Math.round((targetNorms.carbs_min + targetNorms.carbs_max) / 2);
+  const pCarbs = Math.min(150, Math.round((totals.carbs / targetCarbs) * 100));
+
+  // Render Dashboard
+  dashboard.innerHTML = `
+    <div class="builder-stat-cost">
+      <span class="eyebrow">${t('builder_cost')}</span>
+      <div class="builder-cost-val">${fmtCost(totals.cost)}</div>
+      <span class="xs muted">${t('builder_target')}: ${fmtInt(targetNorms.target_calories)} kcal</span>
+    </div>
+    <div class="builder-macro-bars">
+      <div class="progress-bar-wrap">
+        <div class="progress-bar-head">
+          <span><b>${t('kpi_calories')}:</b> ${fmtInt(totals.calories)} / ${fmtInt(targetNorms.target_calories)} kcal</span>
+          <span class="num">${pKcal}%</span>
+        </div>
+        <div class="progress-bar-track">
+          <div class="progress-bar-fill" style="width:${Math.min(100, pKcal)}%;background:var(--color-primary)"></div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-3)">
+        <div class="progress-bar-wrap">
+          <div class="progress-bar-head">
+            <span><b>${t('kpi_protein')}:</b> ${totals.protein}g</span>
+            <span class="num">${pProt}%</span>
+          </div>
+          <div class="progress-bar-track">
+            <div class="progress-bar-fill" style="width:${Math.min(100, pProt)}%;background:var(--c-protein)"></div>
+          </div>
+        </div>
+        <div class="progress-bar-wrap">
+          <div class="progress-bar-head">
+            <span><b>${t('kpi_fat')}:</b> ${totals.fat}g</span>
+            <span class="num">${pFat}%</span>
+          </div>
+          <div class="progress-bar-track">
+            <div class="progress-bar-fill" style="width:${Math.min(100, pFat)}%;background:var(--c-fat)"></div>
+          </div>
+        </div>
+        <div class="progress-bar-wrap">
+          <div class="progress-bar-head">
+            <span><b>${t('kpi_carbs')}:</b> ${totals.carbs}g</span>
+            <span class="num">${pCarbs}%</span>
+          </div>
+          <div class="progress-bar-track">
+            <div class="progress-bar-fill" style="width:${Math.min(100, pCarbs)}%;background:var(--c-carbs)"></div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+  // Render Meals
+  const mealNames = MEAL_NAMES_I18N[S.lang] || MEAL_NAMES_I18N.de;
+  mealsContainer.innerHTML = ['breakfast', 'lunch', 'dinner', 'snack'].map(m => {
+    const items = S.builder[m] || [];
+    let mKcal = 0, mCost = 0;
+    items.forEach(it => {
+      const prod = S.productsMap.get(it.id);
+      if (prod) {
+        const nut = calcItemNutrition(prod, it.grams, S.currency, S.prices);
+        mKcal += nut.calories; mCost += nut.cost;
+      }
+    });
+
+    return `
+      <div class="builder-meal-card" data-bmeal="${m}">
+        <header class="builder-meal-head">
+          <div class="builder-meal-title">${ICON[m]} ${mealNames[m] || m}</div>
+          <div class="builder-meal-meta">${fmtInt(mKcal)} kcal<br>${fmtCost(mCost)}</div>
+        </header>
+
+        ${items.length === 0 ? `<div class="builder-empty-hint">${t('builder_empty_meal')}</div>` : `
+          <ul class="builder-meal-items">${items.map((it, idx) => {
+            const prod = S.productsMap.get(it.id);
+            if (!prod) return '';
+            const nut = calcItemNutrition(prod, it.grams, S.currency, S.prices);
+            const isEgg = lc(prod.n).includes('яйце') || lc(prod.n_de || '').includes('ei');
+            return `
+              <li class="builder-item-row" data-bidx="${idx}">
+                <div class="builder-item-info">
+                  <div class="builder-item-name">${esc(getFoodName(prod, S.lang))}</div>
+                  <div class="builder-item-macros">${fmtInt(nut.calories)} kcal · P ${nut.protein}g · F ${nut.fat}g · C ${nut.carbs}g</div>
+                </div>
+                <div class="builder-stepper">
+                  <button type="button" class="builder-step-btn" data-bact="dec" data-meal="${m}" data-idx="${idx}" aria-label="Decrease portion">-</button>
+                  <span class="builder-item-amt">${isEgg ? Math.round(it.grams / 60) + ' ' + t('builder_pcs') : it.grams + ' ' + t('builder_grams')}</span>
+                  <button type="button" class="builder-step-btn" data-bact="inc" data-meal="${m}" data-idx="${idx}" aria-label="Increase portion">+</button>
+                </div>
+                <div class="builder-item-cost">${fmtCost(nut.cost)}</div>
+                <button type="button" class="builder-item-del" data-bact="del" data-meal="${m}" data-idx="${idx}" aria-label="Remove">${ICON.x}</button>
+              </li>`;
+          }).join('')}</ul>`}
+
+        <div style="margin-top:auto;padding-top:var(--space-3)">
+          <button type="button" class="btn btn--ghost btn--block" data-bact="add" data-meal="${m}">
+            ${t('builder_add_food')}
+          </button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function onBuilderClick(e) {
+  const b = e.target.closest('[data-bact]');
+  if (b) {
+    const act = b.dataset.bact;
+    const meal = b.dataset.meal;
+    const idx = +b.dataset.idx;
+
+    if (act === 'inc') {
+      const it = S.builder[meal][idx];
+      const prod = S.productsMap.get(it.id);
+      const isEgg = lc(prod.n).includes('яйце') || lc(prod.n_de || '').includes('ei');
+      it.grams += isEgg ? 60 : (it.grams >= 200 ? 50 : 25);
+      saveBuilderState(S.builder);
+      renderBuilder();
+    }
+    if (act === 'dec') {
+      const it = S.builder[meal][idx];
+      const prod = S.productsMap.get(it.id);
+      const isEgg = lc(prod.n).includes('яйце') || lc(prod.n_de || '').includes('ei');
+      const minStep = isEgg ? 60 : 25;
+      if (it.grams > minStep) {
+        it.grams -= isEgg ? 60 : (it.grams > 200 ? 50 : 25);
+      } else {
+        S.builder[meal].splice(idx, 1);
+      }
+      saveBuilderState(S.builder);
+      renderBuilder();
+    }
+    if (act === 'del') {
+      S.builder[meal].splice(idx, 1);
+      saveBuilderState(S.builder);
+      renderBuilder();
+    }
+    if (act === 'add') {
+      openBuilderAddFoodDialog(meal);
+    }
+    return;
+  }
+
+  // Presets
+  const pBtn = e.target.closest('[data-preset]');
+  if (pBtn) {
+    const pKey = pBtn.dataset.preset;
+    const preset = ALL_PRESETS[pKey] || GERMAN_PRESETS[pKey];
+    if (preset) {
+      S.builder = JSON.parse(JSON.stringify(preset.items));
+      saveBuilderState(S.builder);
+      renderBuilder();
+      toast(`${preset.name} loaded!`);
+    }
+    return;
+  }
+
+  // Clear
+  if (e.target.id === 'builder-clear') {
+    S.builder = { breakfast: [], lunch: [], dinner: [], snack: [] };
+    saveBuilderState(S.builder);
+    renderBuilder();
+    toast(t('preset_clear'));
+  }
+
+  // Add to list
+  if (e.target.closest('#builder-to-list')) {
+    const planMenu = convertBuilderToPlanMenu(S.builder, S.productsMap, S.currency, S.prices);
+    if (!planMenu.length) {
+      toast(t('builder_empty_meal'));
+      return;
+    }
+    addToList([planMenu], t('builder_title'));
+  }
+
+  // Save diet
+  if (e.target.closest('#builder-save')) {
+    const planMenu = convertBuilderToPlanMenu(S.builder, S.productsMap, S.currency, S.prices);
+    if (!planMenu.length) return;
+    const totals = calcDayTotals(S.builder, S.productsMap, S.currency, S.prices);
+    const entry = {
+      id: Date.now(),
+      date: new Date().toISOString(),
+      profile: S.profile || { budget: totals.cost },
+      label: `Baukasten · ${fmtCost(totals.cost)}`,
+      result: {
+        status: 'builder',
+        total_cost: totals.cost,
+        total_calories: totals.calories,
+        total_protein: totals.protein,
+        total_fat: totals.fat,
+        total_carbs: totals.carbs,
+        menu: planMenu,
+        template: t('builder_title'),
+      }
+    };
+    S.saved.unshift(entry);
+    store.set('saved', S.saved);
+    toast(t('toast_saved'));
+  }
+}
+
+function openBuilderAddFoodDialog(meal) {
+  const allProds = S.data.products.filter(p => p.c !== 'alcohol' && !S.banned.includes(p.id));
+  const mealName = (MEAL_NAMES_I18N[S.lang] || MEAL_NAMES_I18N.de)[meal] || meal;
+
+  openDialog(`
+    <div class="dialog__body dialog--food-picker">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <p class="eyebrow">${mealName}</p>
+          <h2 class="h-section">${t('builder_dialog_title')}</h2>
+        </div>
+      </div>
+
+      <div class="foods-tools" style="grid-template-columns:1fr">
+        <label class="search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input id="picker-search" type="search" placeholder="${esc(t('builder_search_ph'))}" autocomplete="off" autofocus>
+        </label>
+      </div>
+
+      <div class="chips chips--scroll" id="picker-cats">
+        <button type="button" class="chip" data-pcat="" aria-pressed="true">${t('all_cats')}</button>
+        <button type="button" class="chip chip--preset" data-pcat="german_basics">⭐ 🇩🇪 Basics</button>
+        <button type="button" class="chip chip--preset" data-pcat="ua_basics">⭐ 🇺🇦 Базові</button>
+        <button type="button" class="chip" data-pcat="dairy">🥛 ${getCatName(S.cats.dairy, S.lang)}</button>
+        <button type="button" class="chip" data-pcat="grains">🌾 ${getCatName(S.cats.grains, S.lang)}</button>
+        <button type="button" class="chip" data-pcat="poultry">🍗 ${getCatName(S.cats.poultry, S.lang)}</button>
+        <button type="button" class="chip" data-pcat="fish_seafood">🐟 ${getCatName(S.cats.fish_seafood, S.lang)}</button>
+        <button type="button" class="chip" data-pcat="vegetables">🥬 ${getCatName(S.cats.vegetables, S.lang)}</button>
+        <button type="button" class="chip" data-pcat="fruits">🍎 ${getCatName(S.cats.fruits, S.lang)}</button>
+      </div>
+
+      <div class="food-picker-list" id="picker-list"></div>
+
+      <form method="dialog" class="dialog__foot">
+        <button class="btn btn--ghost" value="close">${t('cancel')}</button>
+      </form>
+    </div>
+  `, dlg => {
+    let q = '', cat = '';
+    const GERMAN_BASIC_IDS = [138, 57, 483, 160, 239, 601, 602, 268, 158, 384, 365, 319, 316, 350, 112, 108, 96, 604, 443, 60, 426, 327, 344];
+    const UA_BASIC_IDS = [53, 67, 57, 138, 160, 239, 253, 120, 121, 122, 95, 483, 319, 324, 325, 326, 327, 344, 384, 365, 158, 60];
+
+    const renderPicker = () => {
+      let filtered = allProds;
+      if (cat === 'german_basics') {
+        filtered = filtered.filter(p => GERMAN_BASIC_IDS.includes(p.id));
+      } else if (cat === 'ua_basics') {
+        filtered = filtered.filter(p => UA_BASIC_IDS.includes(p.id));
+      } else if (cat) {
+        filtered = filtered.filter(p => p.c === cat);
+      }
+      if (q) {
+        const query = q.toLowerCase();
+        filtered = filtered.filter(p => {
+          const names = (p.n + ' ' + (p.n_de || '') + ' ' + (p.n_en || '') + ' ' + (p.n_ru || '')).toLowerCase();
+          return names.includes(query);
+        });
+      }
+
+      const listEl = $('#picker-list', dlg);
+      const shown = filtered.slice(0, 50);
+
+      listEl.innerHTML = shown.map(p => {
+        const price = (S.currency === 'EUR') ? (p.pr_eur ?? (p.pr / 45)) : p.pr;
+        return `
+          <button type="button" class="food-picker-item" data-add-id="${p.id}">
+            <div>
+              <div class="item-title">${esc(getFoodName(p, S.lang))}</div>
+              <div class="item-meta">${p.k} kcal · P ${p.p}g · F ${p.f}g · C ${p.cb}g / 100g</div>
+            </div>
+            <div style="text-align:right">
+              <span class="item-price">${fmtCost(price)}</span>
+              <span class="btn btn--sm btn--primary" style="margin-left:8px">${t('builder_add_btn')}</span>
+            </div>
+          </button>`;
+      }).join('');
+    };
+
+    renderPicker();
+
+    $('#picker-search', dlg).addEventListener('input', ev => {
+      q = ev.target.value.trim();
+      renderPicker();
+    });
+
+    $('#picker-cats', dlg).addEventListener('click', ev => {
+      const b = ev.target.closest('[data-pcat]'); if (!b) return;
+      cat = b.dataset.pcat;
+      $$('#picker-cats .chip', dlg).forEach(c => c.setAttribute('aria-pressed', c === b ? 'true' : 'false'));
+      renderPicker();
+    });
+
+    $('#picker-list', dlg).addEventListener('click', ev => {
+      const b = ev.target.closest('[data-add-id]'); if (!b) return;
+      const id = +b.dataset.addId;
+      const prod = S.productsMap.get(id);
+      if (!prod) return;
+
+      const isEgg = lc(prod.n).includes('яйце') || lc(prod.n_de || '').includes('ei');
+      const defaultG = isEgg ? 120 : (prod.c === 'oils_fats' ? 10 : (prod.c === 'nuts_seeds' ? 25 : 100));
+
+      const existing = S.builder[meal].find(x => x.id === id);
+      if (existing) {
+        existing.grams += defaultG;
+      } else {
+        S.builder[meal].push({ id, grams: defaultG });
+      }
+
+      saveBuilderState(S.builder);
+      renderBuilder();
+      dlg.close();
+      toast(`${getFoodName(prod, S.lang)} ${t('toast_added_to_list')}`);
+    });
+  });
+}
+
+/* ─── Week View ─────────────────────────────────────────────── */
 function renderWeek() {
   const out = $('#week-output');
   if (!S.profile) {
-    out.innerHTML = `<div class="panel empty">${ICON.cal}<b>Спочатку заповніть профіль</b><span>Тижневий план будується під ваші норми й бюджет.</span><a class="btn btn--primary" href="#/plan">До профілю</a></div>`;
+    out.innerHTML = `<div class="panel empty">${ICON.cal}<b>${t('week_empty_profile')}</b><a class="btn btn--primary" href="#/plan">${t('edit_profile_btn')}</a></div>`;
     return;
   }
   if (!S.week) {
-    out.innerHTML = `<div class="panel empty">${ICON.cal}<b>Сім днів — сім різних меню</b><span>Натисніть «Скласти тиждень», щоб отримати план і загальний список покупок.</span></div>`;
+    out.innerHTML = `<div class="panel empty">${ICON.cal}<b>${t('week_empty_title')}</b><span>${t('week_empty_sub')}</span></div>`;
     return;
   }
   if (!S.week.length) {
-    out.innerHTML = `<div class="notice notice--warn">Не вдалося скласти тиждень для поточного бюджету. Збільште бюджет на сторінці «Раціон».</div>`;
+    out.innerHTML = `<div class="notice notice--warn">${t('no_solution_title', fmtCost(S.profile.budget))}</div>`;
     return;
   }
+
+  const dayNames = DAY_NAMES_I18N[S.lang] || DAY_NAMES_I18N.de;
   const total = S.week.reduce((s, d) => s + d.total_cost, 0);
   const kcal = S.week.reduce((s, d) => s + d.total_calories, 0) / 7;
-  const dishesFor = d => buildDishes(d.menu);
+  const dishesFor = d => buildDishes(d.menu, S.lang);
+
   out.innerHTML = `
     <div class="kpis week-sum">
-      <div class="kpi kpi--accent"><span class="kpi__label">Тиждень коштує</span><span class="kpi__value">${uah(total)}</span><span class="kpi__sub">≈ ${uah(total / 7)} на день</span></div>
-      <div class="kpi"><span class="kpi__label">Місяць (×4.3)</span><span class="kpi__value">${int(total * 4.3)}<small>грн</small></span><span class="kpi__sub">орієнтовно</span></div>
-      <div class="kpi"><span class="kpi__label">Середньо калорій</span><span class="kpi__value">${int(kcal)}<small>ккал</small></span><span class="kpi__sub">ціль ${int(S.norms.target_calories)}</span></div>
-      <div class="kpi"><span class="kpi__label">Різних шаблонів</span><span class="kpi__value">${new Set(S.week.map(d => d.template)).size}</span><span class="kpi__sub">з 7 днів</span></div>
+      <div class="kpi kpi--accent">
+        <span class="kpi__label">${t('week_cost_total')}</span>
+        <span class="kpi__value">${fmtCost(total)}</span>
+        <span class="kpi__sub">${t('week_per_day', fmtCost(total / 7))}</span>
+      </div>
+      <div class="kpi">
+        <span class="kpi__label">${t('week_month_est')}</span>
+        <span class="kpi__value">${fmtCost(total * 4.3)}</span>
+      </div>
+      <div class="kpi">
+        <span class="kpi__label">${t('week_avg_kcal')}</span>
+        <span class="kpi__value">${fmtInt(kcal)}<small>${t('kpi_kcal')}</small></span>
+      </div>
+      <div class="kpi">
+        <span class="kpi__label">${t('week_templates_count')}</span>
+        <span class="kpi__value">${new Set(S.week.map(d => d.template)).size}</span>
+      </div>
     </div>
     <div class="actions" style="margin-bottom:1.25rem">
-      <button class="btn btn--primary" data-wact="list">${ICON.cart} Усе у список покупок</button>
-      <button class="btn" data-wact="share">${ICON.share} Поділитися</button>
-      <button class="btn" data-wact="print">${ICON.print} Друк / PDF</button>
+      <button class="btn btn--primary" data-wact="list">${ICON.cart} ${t('week_all_to_list')}</button>
+      <button class="btn" data-wact="share">${ICON.share} ${t('btn_share')}</button>
+      <button class="btn" data-wact="print">${ICON.print} ${t('btn_print')}</button>
     </div>
     <div class="days">${S.week.map((d, i) => {
       const ds = dishesFor(d);
       return `<article class="day">
-        <header class="day__head"><div><div class="day__name">${DAY_NAMES[i]}</div><div class="day__tpl">${esc(d.template)}</div></div><div class="day__cost">${uah(d.total_cost)}</div></header>
-        <div class="day__body">${MEAL_ORDER.filter(m => ds[m]).map(m => `<div class="day__meal"><b>${MEAL_NAMES[m]}</b><span>${esc(ds[m].title)}</span></div>`).join('')}</div>
-        <footer class="day__foot"><span>${int(d.total_calories)} ккал · Б ${int(d.total_protein)}</span><button class="btn btn--sm" data-wact="open" data-i="${i}">Детальніше</button></footer>
+        <header class="day__head">
+          <div><div class="day__name">${dayNames[i] || 'Day ' + (i + 1)}</div><div class="day__tpl">${esc(d.template)}</div></div>
+          <div class="day__cost">${fmtCost(d.total_cost)}</div>
+        </header>
+        <div class="day__body">${MEAL_ORDER.filter(m => ds[m]).map(m => `
+          <div class="day__meal"><b>${(MEAL_NAMES_I18N[S.lang] || MEAL_NAMES_I18N.de)[m] || m}:</b> <span>${esc(ds[m].title)}</span></div>`).join('')}</div>
+        <footer class="day__foot">
+          <span>${fmtInt(d.total_calories)} kcal · P ${fmtInt(d.total_protein)}g</span>
+          <button class="btn btn--sm" data-wact="open" data-i="${i}">${t('week_details_btn')}</button>
+        </footer>
       </article>`;
     }).join('')}</div>`;
 }
@@ -483,87 +1058,116 @@ function renderWeek() {
 function onWeekClick(e) {
   const b = e.target.closest('[data-wact]'); if (!b) return;
   const a = b.dataset.wact;
-  if (a === 'list') addToList(S.week.map(d => d.menu), 'План на тиждень');
+  if (a === 'list') addToList(S.week.map(d => d.menu), t('week_title'));
   if (a === 'print') window.print();
   if (a === 'share') {
     const total = S.week.reduce((s, d) => s + d.total_cost, 0);
-    const text = `DietOpt — мій план на тиждень за ${uah(total)}:\n` + S.week.map((d, i) => {
-      const ds = buildDishes(d.menu);
-      return `\n${DAY_NAMES[i]} (${uah(d.total_cost)}): ` + MEAL_ORDER.filter(m => ds[m]).map(m => ds[m].title).join(' · ');
+    const dayNames = DAY_NAMES_I18N[S.lang] || DAY_NAMES_I18N.de;
+    const text = `DietOpt — ${t('week_title')} (${fmtCost(total)}):\n` + S.week.map((d, i) => {
+      const ds = buildDishes(d.menu, S.lang);
+      return `\n${dayNames[i]} (${fmtCost(d.total_cost)}): ` + MEAL_ORDER.filter(m => ds[m]).map(m => ds[m].title).join(' · ');
     }).join('');
-    shareOrCopy({ title: 'План на тиждень', text: text + '\n\nСклади свій:', url: profileLink(S.profile) });
+    shareOrCopy({ title: t('week_title'), text });
   }
   if (a === 'open') {
     const d = S.week[+b.dataset.i];
-    const ds = buildDishes(d.menu);
+    const ds = buildDishes(d.menu, S.lang);
+    const dayNames = DAY_NAMES_I18N[S.lang] || DAY_NAMES_I18N.de;
     openDialog(`<div class="dialog__body" style="max-height:80dvh;overflow:auto">
-      <div><p class="eyebrow">${DAY_NAMES[+b.dataset.i]} · ${esc(d.template)}</p><h2 class="h-section">${uah(d.total_cost)} · ${int(d.total_calories)} ккал</h2></div>
+      <div>
+        <p class="eyebrow">${dayNames[+b.dataset.i]} · ${esc(d.template)}</p>
+        <h2 class="h-section">${fmtCost(d.total_cost)} · ${fmtInt(d.total_calories)} kcal</h2>
+      </div>
       <div class="meals">${MEAL_ORDER.map(m => mealHTML(m, d.menu.filter(i => i.meal === m), ds[m])).join('')}</div>
       <div class="dishes" style="grid-template-columns:1fr">${MEAL_ORDER.filter(m => ds[m]).map(m => dishHTML(m, ds[m])).join('')}</div>
-      <form method="dialog" class="dialog__foot"><button class="btn btn--primary">Закрити</button></form></div>`,
+      <form method="dialog" class="dialog__foot"><button class="btn btn--primary">${t('cancel')}</button></form></div>`,
       dlg => $$('.item__x', dlg).forEach(x => x.remove()));
   }
 }
 
 async function buildWeekNow() {
-  if (!S.profile) { location.hash = '#/plan'; toast('Спочатку заповніть профіль'); return; }
+  if (!S.profile) { location.hash = '#/plan'; toast(t('week_empty_profile')); return; }
   const btn = $('#week-build'); btn.classList.add('is-loading');
   $('#week-output').innerHTML = `<div class="days">${'<div class="skel" style="height:260px"></div>'.repeat(3)}</div>`;
   await nextFrame();
-  const products = filterProducts(S.data.products, S.profile, { bannedIds: S.banned, priceOverrides: S.prices });
+  const products = filterProducts(S.data.products, S.profile, {
+    bannedIds: S.banned, priceOverrides: S.prices, currency: S.currency,
+  });
   S.week = buildWeek(products, S.profile, S.norms, Date.now());
   btn.classList.remove('is-loading');
   renderWeek();
 }
 
-/* ─── Список покупок ────────────────────────────────────────── */
+/* ─── Shopping List ─────────────────────────────────────────── */
 function addToList(menus, source) {
   const agg = aggregateShopping(menus);
   const map = new Map(S.list.items.map(i => [i.id, i]));
   agg.forEach(a => {
     const cur = map.get(a.id);
-    if (cur) { cur.grams += a.grams; cur.cost = Math.round((cur.cost + a.cost) * 100) / 100; cur.done = false; }
-    else map.set(a.id, { ...a, done: false });
+    if (cur) {
+      cur.grams += a.grams;
+      cur.cost = Math.round((cur.cost + a.cost) * 100) / 100;
+      cur.done = false;
+    } else {
+      map.set(a.id, { ...a, done: false });
+    }
   });
-  S.list = { items: [...map.values()], source: S.list.items.length ? 'Кілька раціонів' : source };
+  S.list = { items: [...map.values()], source: S.list.items.length ? 'Combined Diet' : source };
   store.set('list', S.list);
   updateBadges();
-  toast(`Додано ${agg.length} продуктів до списку покупок`);
+  toast(t('toast_added_to_list'));
 }
 
 function qtyText(i) {
-  const n = i.name.toLowerCase();
-  if (n.includes('яйце куряче')) return `${Math.ceil(i.grams / 60)} шт`;
-  const liquid = i.liquid || /молоко|кефір|ряжанк|йогурт|олія/.test(n);
-  if (i.grams >= 1000) return `${(i.grams / 1000).toFixed(2).replace(/\.?0+$/, '')} ${liquid ? 'л' : 'кг'}`;
-  return `${Math.round(i.grams)} ${liquid ? 'мл' : 'г'}`;
+  const n = (i.name + ' ' + (i.n_de || '')).toLowerCase();
+  const isEgg = n.includes('яйце') || n.includes('ei') || n.includes('egg');
+  if (isEgg) {
+    const pcs = Math.ceil(i.grams / 60);
+    return `${pcs} ${S.lang === 'de' ? (pcs === 1 ? 'Ei' : 'Eier') : S.lang === 'en' ? (pcs === 1 ? 'egg' : 'eggs') : 'шт'}`;
+  }
+  const isLiquid = i.liquid || /молоко|кефір|ряжанк|йогурт|олія|öl|milch|juice/.test(n);
+  if (i.grams >= 1000) return `${(i.grams / 1000).toFixed(2).replace(/\.?0+$/, '')} ${isLiquid ? 'L' : 'kg'}`;
+  return `${Math.round(i.grams)} ${isLiquid ? 'ml' : 'g'}`;
 }
 
 function renderList() {
   const out = $('#list-output');
   const items = S.list.items;
-  $('#list-share').disabled = !items.length; $('#list-clear').disabled = !items.length;
+  $('#list-share').disabled = !items.length;
+  $('#list-clear').disabled = !items.length;
+
   if (!items.length) {
-    out.innerHTML = `<div class="panel empty">${ICON.bag}<b>Список порожній</b><span>Складіть раціон або тижневий план і натисніть «У список покупок».</span><a class="btn btn--primary" href="#/plan">Скласти раціон</a></div>`;
+    out.innerHTML = `<div class="panel empty">${ICON.bag}<b>${t('list_empty_title')}</b><span>${t('list_empty_sub')}</span><a class="btn btn--primary" href="#/plan">${t('nav_plan')}</a></div>`;
     return;
   }
+
   const groups = {};
   items.forEach(i => { (groups[i.category] ||= []).push(i); });
   const total = items.reduce((s, i) => s + i.cost, 0);
   const left = items.filter(i => !i.done).reduce((s, i) => s + i.cost, 0);
   const done = items.filter(i => i.done).length;
+
   out.innerHTML = `<div class="shop">
     <div class="card shop-total">
-      <div><p class="eyebrow">${esc(S.list.source || 'Список')}</p><div class="h-section num">${uah(total)}</div><span class="xs muted">залишилось купити на ${uah(left)} · куплено ${done} з ${items.length}</span></div>
+      <div>
+        <p class="eyebrow">${esc(S.list.source || t('list_title'))}</p>
+        <div class="h-section num">${fmtCost(total)}</div>
+        <span class="xs muted">${t('list_to_buy_left', fmtCost(left), done, items.length)}</span>
+      </div>
     </div>
     ${Object.entries(groups).sort((a, b) => (S.cats[a[0]]?.id ?? 99) - (S.cats[b[0]]?.id ?? 99)).map(([cat, list]) => `
-      <div class="shop-group"><h3>${esc(S.cats[cat]?.name_ua || cat)}</h3>
-        <ul class="shop-list">${list.sort((a, b) => a.done - b.done || a.name.localeCompare(b.name, 'uk')).map(i => `
+      <div class="shop-group">
+        <h3>${esc(getCatName(S.cats[cat], S.lang) || cat)}</h3>
+        <ul class="shop-list">${list.sort((a, b) => a.done - b.done).map(i => `
           <li class="shop-item ${i.done ? 'done' : ''}" data-id="${i.id}">
-            <input type="checkbox" ${i.done ? 'checked' : ''} aria-label="Куплено: ${esc(i.name)}">
-            <div><div class="shop-item__name">${esc(shortName(i.name))}</div><div class="shop-item__qty">${qtyText(i)}</div></div>
-            <div class="shop-item__cost">${uah(i.cost)}</div>
-          </li>`).join('')}</ul></div>`).join('')}
+            <input type="checkbox" ${i.done ? 'checked' : ''} aria-label="Checked: ${esc(getFoodName(i, S.lang))}">
+            <div>
+              <div class="shop-item__name">${esc(shortName(i.name, i, S.lang))}</div>
+              <div class="shop-item__qty">${qtyText(i)}</div>
+            </div>
+            <div class="shop-item__cost">${fmtCost(i.cost)}</div>
+          </li>`).join('')}</ul>
+      </div>`).join('')}
   </div>`;
 }
 
@@ -575,61 +1179,112 @@ function onListClick(e) {
 
 function updateBadges() {
   const n = S.list.items.filter(i => !i.done).length;
-  $$('[data-count-list]').forEach(el => { el.hidden = !n; if (el.classList.contains('pill')) el.textContent = n; });
+  $$('[data-count-list]').forEach(el => {
+    el.hidden = !n;
+    if (el.classList.contains('pill')) el.textContent = n;
+  });
 }
 
-/* ─── База продуктів ────────────────────────────────────────── */
+/* ─── Food Database ─────────────────────────────────────────── */
 const F = { q: '', cat: '', sort: 'name', limit: 60 };
+
 function renderFoods() {
   const catsEl = $('#food-cats');
-  if (!catsEl.childElementCount) {
-    catsEl.innerHTML = `<button class="chip" data-cat="" aria-pressed="true">Усі</button>` +
-      S.data.categories.filter(c => c.name !== 'alcohol').map(c => `<button class="chip" data-cat="${c.name}" aria-pressed="false">${esc(c.name_ua)}</button>`).join('');
+  if (catsEl && !catsEl.childElementCount) {
+    catsEl.innerHTML = `<button class="chip" data-cat="" aria-pressed="true">${t('all_cats')}</button>` +
+      S.data.categories.filter(c => c.name !== 'alcohol').map(c => `
+        <button class="chip" data-cat="${c.name}" aria-pressed="false">${esc(getCatName(c, S.lang))}</button>`).join('');
   }
-  let list = S.data.products.map(p => ({ ...p, pr: S.prices[p.id] ?? p.pr, custom: p.id in S.prices }));
+
+  let list = S.data.products.map(p => {
+    const basePr = (S.currency === 'EUR') ? (p.pr_eur ?? (p.pr / 45)) : p.pr;
+    return {
+      ...p,
+      displayPrice: S.prices[p.id] ?? basePr,
+      custom: p.id in S.prices,
+    };
+  });
+
   const q = F.q.trim().toLowerCase();
-  if (q) list = list.filter(p => p.n.toLowerCase().includes(q));
+  if (q) {
+    list = list.filter(p => {
+      const allNames = (p.n + ' ' + (p.n_de || '') + ' ' + (p.n_en || '') + ' ' + (p.n_ru || '')).toLowerCase();
+      return allNames.includes(q);
+    });
+  }
+
   if (F.cat) list = list.filter(p => p.c === F.cat);
   else list = list.filter(p => p.c !== 'alcohol');
+
   const sorters = {
-    name: (a, b) => a.n.localeCompare(b.n, 'uk'),
-    price: (a, b) => a.pr - b.pr,
-    protein_per_uah: (a, b) => b.p / b.pr - a.p / a.pr,
-    kcal_per_uah: (a, b) => b.k / b.pr - a.k / a.pr,
+    name: (a, b) => getFoodName(a, S.lang).localeCompare(getFoodName(b, S.lang)),
+    price: (a, b) => a.displayPrice - b.displayPrice,
+    protein_per_cost: (a, b) => (b.p / b.displayPrice) - (a.p / a.displayPrice),
+    kcal_per_cost: (a, b) => (b.k / b.displayPrice) - (a.k / a.displayPrice),
     protein: (a, b) => b.p - a.p,
   };
-  list.sort(sorters[F.sort]);
+
+  list.sort(sorters[F.sort] || sorters.name);
   const out = $('#foods-output');
-  if (!list.length) { out.innerHTML = `<div class="panel empty"><b>Нічого не знайдено</b><span>Спробуйте іншу назву або категорію.</span></div>`; return; }
+  if (!list.length) {
+    out.innerHTML = `<div class="panel empty"><b>0 Items found</b><span>Try a different query or category filter.</span></div>`;
+    return;
+  }
+
   const shown = list.slice(0, F.limit);
-  out.innerHTML = `<p class="xs muted" style="margin:0 0 .5rem .25rem">Знайдено ${list.length}</p><div class="foods">${shown.map(p => `
-    <button class="food" data-id="${p.id}">
-      <div><div class="food__name">${esc(p.n)}${S.banned.includes(p.id) ? '<span class="tag tag--accent">не їм</span>' : ''}${p.custom ? '<span class="tag tag--ok">моя ціна</span>' : ''}</div>
-        <div class="food__meta">${p.k} ккал · Б ${p.p} · Ж ${p.f} · В ${p.cb}${F.sort === 'protein_per_uah' ? ` · ${(p.p / p.pr * 10).toFixed(1)} г білка/10 грн` : ''}${F.sort === 'kcal_per_uah' ? ` · ${int(p.k / p.pr * 10)} ккал/10 грн` : ''}</div></div>
-      <div class="food__price">${uah(p.pr)}<small>за 100 г</small></div>
-    </button>`).join('')}</div>
-    ${list.length > F.limit ? `<div class="foods-more"><button class="btn" id="foods-more">Показати ще ${Math.min(60, list.length - F.limit)}</button></div>` : ''}`;
+  out.innerHTML = `
+    <p class="xs muted" style="margin:0 0 .5rem .25rem">${t('foods_found', list.length)}</p>
+    <div class="foods">${shown.map(p => `
+      <button class="food" data-id="${p.id}">
+        <div>
+          <div class="food__name">
+            ${esc(getFoodName(p, S.lang))}
+            ${S.banned.includes(p.id) ? `<span class="tag tag--accent">${t('food_banned_tag')}</span>` : ''}
+            ${p.custom ? `<span class="tag tag--ok">${t('food_price_override_tag')}</span>` : ''}
+          </div>
+          <div class="food__meta">${p.k} kcal · P ${p.p}g · F ${p.f}g · C ${p.cb}g</div>
+        </div>
+        <div class="food__price">${fmtCost(p.displayPrice)}<small>per 100g</small></div>
+      </button>`).join('')}
+    </div>
+    ${list.length > F.limit ? `<div class="foods-more"><button class="btn" id="foods-more">${t('foods_show_more', Math.min(60, list.length - F.limit))}</button></div>` : ''}`;
 }
 
 function openFood(id) {
-  const p = S.data.products.find(x => x.id === id);
-  const price = S.prices[id] ?? p.pr;
+  const p = S.productsMap.get(id);
+  const basePr = (S.currency === 'EUR') ? (p.pr_eur ?? (p.pr / 45)) : p.pr;
+  const currentPr = S.prices[id] ?? basePr;
   const banned = S.banned.includes(id);
+
   openDialog(`<div class="dialog__body">
-    <div><p class="eyebrow">${esc(S.cats[p.c]?.name_ua || '')}</p><h2 class="h-section">${esc(p.n)}</h2></div>
+    <div>
+      <p class="eyebrow">${esc(getCatName(S.cats[p.c], S.lang))}</p>
+      <h2 class="h-section">${esc(getFoodName(p, S.lang))}</h2>
+    </div>
     <div class="norms" style="margin:0">
-      <div class="norm"><b>${p.k}</b><span>ккал / 100 г</span></div><div class="norm"><b>${p.p} г</b><span>білки</span></div>
-      <div class="norm"><b>${p.f} г</b><span>жири</span></div><div class="norm"><b>${p.cb} г</b><span>вуглеводи</span></div>
+      <div class="norm"><b>${p.k}</b><span>kcal / 100g</span></div>
+      <div class="norm"><b>${p.p} g</b><span>Protein</span></div>
+      <div class="norm"><b>${p.f} g</b><span>Fett</span></div>
+      <div class="norm"><b>${p.cb} g</b><span>Carbs</span></div>
     </div>
     <form method="dialog" class="form" id="food-form">
-      <label class="field"><span class="label">Ціна за 100 г у вашому магазині <span class="muted xs">база: ${uah(p.pr)}</span></span>
-        <span class="input-wrap"><input name="price" type="number" inputmode="decimal" step="0.1" min="0.1" value="${price}"><i>грн</i></span></label>
-      <label class="row-gap small" style="align-items:center;cursor:pointer"><input type="checkbox" name="ban" ${banned ? 'checked' : ''} style="width:20px;height:20px;accent-color:var(--color-accent)"> Не їм — не додавати в меню</label>
+      <label class="field">
+        <span class="label">${t('food_store_price')} <span class="muted xs">${t('food_base_price')} ${fmtCost(basePr)}</span></span>
+        <span class="input-wrap">
+          <input name="price" type="number" inputmode="decimal" step="0.05" min="0.05" value="${currentPr}">
+          <i>${S.currency === 'EUR' ? '€' : 'грн'}</i>
+        </span>
+      </label>
+      <label class="row-gap small" style="align-items:center;cursor:pointer">
+        <input type="checkbox" name="ban" ${banned ? 'checked' : ''} style="width:20px;height:20px;accent-color:var(--color-accent)">
+        ${t('food_exclude_check')}
+      </label>
       <div class="dialog__foot">
-        ${id in S.prices ? '<button class="btn btn--ghost" value="reset">Скинути ціну</button>' : ''}
-        <button class="btn btn--ghost" value="cancel" formnovalidate>Скасувати</button>
-        <button class="btn btn--primary" value="ok">Зберегти</button>
-      </div></form></div>`, dlg => {
+        ${id in S.prices ? `<button class="btn btn--ghost" value="reset">${t('food_reset_price')}</button>` : ''}
+        <button class="btn btn--ghost" value="cancel" formnovalidate>${t('cancel')}</button>
+        <button class="btn btn--primary" value="ok">${t('save')}</button>
+      </div>
+    </form></div>`, dlg => {
     $('#food-form', dlg).addEventListener('submit', ev => {
       const v = ev.submitter?.value;
       if (v === 'cancel') return;
@@ -637,56 +1292,94 @@ function openFood(id) {
       if (v === 'reset') delete S.prices[id];
       else {
         const np = parseFloat(f.price.value);
-        if (np > 0 && Math.abs(np - p.pr) > 0.001) S.prices[id] = np; else delete S.prices[id];
+        if (np > 0 && Math.abs(np - basePr) > 0.001) S.prices[id] = np;
+        else delete S.prices[id];
         S.banned = S.banned.filter(x => x !== id);
         if (f.ban.checked) S.banned.push(id);
       }
       store.set('prices', S.prices); store.set('banned', S.banned);
-      renderFoods(); toast('Збережено. Нові ціни враховуються в наступних розрахунках.');
+      renderFoods(); toast(t('toast_prices_saved'));
     });
   });
 }
 
-/* ─── Розділ «Ще» ───────────────────────────────────────────── */
+/* ─── More / Settings View ──────────────────────────────────── */
 function renderMore() {
   const sv = $('#saved-output');
   sv.innerHTML = S.saved.length ? `<ul class="saved">${S.saved.map(s => `
-    <li><div><b>${esc(s.label)}</b><span>${new Date(s.date).toLocaleDateString('uk-UA', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · ${int(s.result.total_calories)} ккал</span></div>
-      <div class="row-gap"><button class="btn btn--sm" data-sact="open" data-id="${s.id}">Відкрити</button><button class="btn btn--sm btn--ghost" data-sact="del" data-id="${s.id}" aria-label="Видалити">${ICON.x}</button></div></li>`).join('')}</ul>`
-    : '<p class="small muted">Тут з\'являться раціони, які ви збережете кнопкою «Зберегти».</p>';
+    <li>
+      <div><b>${esc(s.label)}</b><span>${new Date(s.date).toLocaleDateString(S.lang === 'de' ? 'de-DE' : S.lang === 'en' ? 'en-US' : 'ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · ${fmtInt(s.result.total_calories)} kcal</span></div>
+      <div class="row-gap">
+        <button class="btn btn--sm" data-sact="open" data-id="${s.id}">Open</button>
+        <button class="btn btn--sm btn--ghost" data-sact="del" data-id="${s.id}" aria-label="Delete">${ICON.x}</button>
+      </div>
+    </li>`).join('')}</ul>`
+    : `<p class="small muted">${t('saved_empty')}</p>`;
 
   const ov = $('#overrides-output');
   const priced = Object.keys(S.prices).map(Number);
-  const rows = [...new Set([...priced, ...S.banned])].map(id => S.data.products.find(p => p.id === id)).filter(Boolean);
-  ov.innerHTML = rows.length ? `<ul class="saved">${rows.map(p => `<li><div><b>${esc(p.n)}</b><span>${S.banned.includes(p.id) ? 'не їм' : ''}${S.banned.includes(p.id) && p.id in S.prices ? ' · ' : ''}${p.id in S.prices ? `${uah(S.prices[p.id])} замість ${uah(p.pr)}` : ''}</span></div>
-      <button class="btn btn--sm btn--ghost" data-oact="reset" data-id="${p.id}">Скинути</button></li>`).join('')}</ul>`
-    : '<p class="small muted">Ви ще не змінювали ціни і не виключали продукти. Це можна зробити в розділі «Продукти» або кнопкою × у меню.</p>';
+  const rows = [...new Set([...priced, ...S.banned])].map(id => S.productsMap.get(id)).filter(Boolean);
+  ov.innerHTML = rows.length ? `<ul class="saved">${rows.map(p => `
+    <li>
+      <div><b>${esc(getFoodName(p, S.lang))}</b><span>${S.banned.includes(p.id) ? t('food_banned_tag') : ''}${S.banned.includes(p.id) && p.id in S.prices ? ' · ' : ''}${p.id in S.prices ? `${fmtCost(S.prices[p.id])}` : ''}</span></div>
+      <button class="btn btn--sm btn--ghost" data-oact="reset" data-id="${p.id}">${t('reset_override')}</button>
+    </li>`).join('')}</ul>`
+    : `<p class="small muted">${t('overrides_empty')}</p>`;
 
-  const f = $('#ai-form'); f.key.value = S.ai.key || ''; f.model.value = S.ai.model || 'gemini-3.5-flash-lite';
-  $('#about-db').textContent = `${S.data.products.length} продуктів, ${S.data.categories.length} категорій, ціни в грн (оновлено ${S.data.version})`;
+  const f = $('#ai-form');
+  if (f) {
+    f.key.value = S.ai.key || '';
+    f.model.value = S.ai.model || 'gemini-2.5-flash-lite';
+  }
+  $('#about-db').textContent = `${S.data.products.length} foods (German, English, Ukrainian, Russian), prices in EUR & UAH`;
 }
 
 function onMoreClick(e) {
   const s = e.target.closest('[data-sact]');
   if (s) {
     const id = +s.dataset.id;
-    if (s.dataset.sact === 'del') { S.saved = S.saved.filter(x => x.id !== id); store.set('saved', S.saved); renderMore(); }
+    if (s.dataset.sact === 'del') {
+      S.saved = S.saved.filter(x => x.id !== id);
+      store.set('saved', S.saved); renderMore();
+    }
     if (s.dataset.sact === 'open') {
       const it = S.saved.find(x => x.id === id);
-      writeForm(it.profile); S.profile = it.profile; S.norms = calculateNorms(it.profile);
-      S.candidates = [it.result]; S.variant = 0; S.basic = null; S.view = 'opt'; S.aiText = null;
-      location.hash = '#/plan'; setTimeout(renderPlan, 0);
+      if (it.result.status === 'builder') {
+        location.hash = '#/builder';
+      } else {
+        writeForm(it.profile); S.profile = it.profile; S.norms = calculateNorms(it.profile);
+        S.candidates = [it.result]; S.variant = 0; S.basic = null; S.view = 'opt'; S.aiText = null;
+        location.hash = '#/plan'; setTimeout(renderPlan, 0);
+      }
     }
     return;
   }
   const o = e.target.closest('[data-oact]');
   if (o) {
-    const id = +o.dataset.id; delete S.prices[id]; S.banned = S.banned.filter(x => x !== id);
+    const id = +o.dataset.id;
+    delete S.prices[id]; S.banned = S.banned.filter(x => x !== id);
     store.set('prices', S.prices); store.set('banned', S.banned); renderMore();
   }
 }
 
-/* ─── Діалог ────────────────────────────────────────────────── */
+/* ─── Share / Clipboard Helper ──────────────────────────────── */
+async function shareOrCopy({ title, text, url }) {
+  const full = url ? `${text}\n\n${url}` : text;
+  if (navigator.share) {
+    try { await navigator.share({ title, text, url }); return; } catch (e) { if (e.name === 'AbortError') return; }
+  }
+  try {
+    await navigator.clipboard.writeText(full);
+    toast(t('toast_copied'));
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = full; document.body.append(ta); ta.select();
+    try { document.execCommand('copy'); toast(t('toast_copied')); } catch {}
+    ta.remove();
+  }
+}
+
+/* ─── Dialog Helper ─────────────────────────────────────────── */
 function openDialog(html, setup) {
   const d = $('#dlg');
   d.innerHTML = html;
@@ -695,54 +1388,97 @@ function openDialog(html, setup) {
   d.showModal();
 }
 
-/* ─── Тема, PWA ─────────────────────────────────────────────── */
+/* ─── Theme & PWA ───────────────────────────────────────────── */
 function initTheme() {
   $('#theme-toggle').addEventListener('click', () => {
-    const t = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-    document.documentElement.setAttribute('data-theme', t);
-    try { localStorage.setItem('dietopt.theme', t); } catch { /* ignore */ }
+    const tMode = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', tMode);
+    try { localStorage.setItem('dietopt.theme', tMode); } catch {}
   });
 }
 
 let installEvt = null;
 function initPWA() {
-  window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; $('#install-btn').hidden = false; });
-  $('#install-btn').addEventListener('click', async () => { if (!installEvt) return; installEvt.prompt(); await installEvt.userChoice; installEvt = null; $('#install-btn').hidden = true; });
+  window.addEventListener('beforeinstallprompt', e => {
+    e.preventDefault(); installEvt = e;
+    const btn = $('#install-btn');
+    if (btn) btn.hidden = false;
+  });
+  $('#install-btn')?.addEventListener('click', async () => {
+    if (!installEvt) return;
+    installEvt.prompt();
+    await installEvt.userChoice;
+    installEvt = null;
+    $('#install-btn').hidden = true;
+  });
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    try { navigator.serviceWorker.register('sw.js').catch(() => { /* офлайн-режим недоступний — не критично */ }); } catch { /* sandbox */ }
+    try { navigator.serviceWorker.register('sw.js').catch(() => {}); } catch {}
   }
 }
 
-/* ─── Старт ─────────────────────────────────────────────────── */
+/* ─── Boot ──────────────────────────────────────────────────── */
 async function boot() {
   initTheme();
   try {
     const res = await fetch('data/products.json');
     S.data = await res.json();
   } catch {
-    $('#plan-empty').innerHTML = '<div class="notice notice--err">Не вдалося завантажити базу продуктів. Перевірте з\'єднання та оновіть сторінку.</div>';
+    $('#plan-empty').innerHTML = '<div class="notice notice--err">Failed to load food database. Please refresh.</div>';
     return;
   }
+
   S.data.categories.forEach(c => { S.cats[c.name] = c; });
+  S.data.products.forEach(p => { S.productsMap.set(p.id, p); });
+
+  initLanguageAndCurrency();
   initForm();
-  if (store.get('profile', null)) { S.profile = readForm(); S.norms = calculateNorms(S.profile); }
+  updateStaticTexts();
+
+  if (store.get('profile', null)) {
+    S.profile = readForm();
+    S.norms = calculateNorms(S.profile);
+  }
+
   initPWA();
   updateBadges();
 
+  // Event Listeners
   $('#plan-output').addEventListener('click', onPlanClick);
+  $('#builder-dashboard').addEventListener('click', onBuilderClick);
+  $('#builder-meals').addEventListener('click', onBuilderClick);
+  $('#builder-presets').addEventListener('click', onBuilderClick);
+  $('#builder-clear').addEventListener('click', onBuilderClick);
+  $('#builder-to-list').addEventListener('click', onBuilderClick);
+  $('#builder-save').addEventListener('click', onBuilderClick);
+
   $('#week-output').addEventListener('click', onWeekClick);
   $('#week-build').addEventListener('click', buildWeekNow);
+
   $('#list-output').addEventListener('click', onListClick);
   $('#list-clear').addEventListener('click', () => {
-    openDialog(`<div class="dialog__body"><h2 class="h-section">Очистити список покупок?</h2><p class="small muted">Усі продукти буде видалено зі списку.</p>
-      <form method="dialog" class="dialog__foot"><button class="btn btn--ghost" value="no">Скасувати</button><button class="btn btn--primary" value="yes">Очистити</button></form></div>`,
-      d => $('form', d).addEventListener('submit', ev => { if (ev.submitter?.value === 'yes') { S.list = { items: [], source: '' }; store.set('list', S.list); renderList(); updateBadges(); } }));
+    openDialog(`<div class="dialog__body">
+      <h2 class="h-section">${t('list_clear_confirm')}</h2>
+      <p class="small muted">${t('list_clear_confirm_sub')}</p>
+      <form method="dialog" class="dialog__foot">
+        <button class="btn btn--ghost" value="no">${t('cancel')}</button>
+        <button class="btn btn--primary" value="yes">${t('clear')}</button>
+      </form></div>`,
+      d => $('form', d).addEventListener('submit', ev => {
+        if (ev.submitter?.value === 'yes') {
+          S.list = { items: [], source: '' };
+          store.set('list', S.list);
+          renderList();
+          updateBadges();
+        }
+      }));
   });
+
   $('#list-share').addEventListener('click', () => {
-    const lines = S.list.items.filter(i => !i.done).map(i => `☐ ${shortName(i.name)} — ${qtyText(i)}`);
+    const lines = S.list.items.filter(i => !i.done).map(i => `☐ ${shortName(i.name, i, S.lang)} — ${qtyText(i)}`);
     const total = S.list.items.filter(i => !i.done).reduce((s, i) => s + i.cost, 0);
-    shareOrCopy({ title: 'Список покупок', text: `Список покупок (≈${uah(total)}):\n${lines.join('\n')}` });
+    shareOrCopy({ title: t('list_title'), text: `${t('list_title')} (${fmtCost(total)}):\n${lines.join('\n')}` });
   });
+
   $('#food-search').addEventListener('input', e => { F.q = e.target.value; F.limit = 60; renderFoods(); });
   $('#food-sort').addEventListener('change', e => { F.sort = e.target.value; renderFoods(); });
   $('#food-cats').addEventListener('click', e => {
@@ -755,19 +1491,29 @@ async function boot() {
     if (e.target.id === 'foods-more') { F.limit += 60; renderFoods(); return; }
     const b = e.target.closest('.food'); if (b) openFood(+b.dataset.id);
   });
+
   $('.more-grid').addEventListener('click', onMoreClick);
-  $('#ai-form').addEventListener('submit', e => {
+  $('#ai-form')?.addEventListener('submit', e => {
     e.preventDefault();
     S.ai = { key: e.target.key.value.trim(), model: e.target.model.value };
-    store.set('ai', S.ai); toast('Налаштування AI збережено');
+    store.set('ai', S.ai); toast(t('toast_prices_saved'));
   });
-  $('#ai-clear').addEventListener('click', () => { S.ai = { key: '', model: S.ai.model }; store.set('ai', S.ai); renderMore(); toast('Ключ видалено'); });
-  $('#reset-all').addEventListener('click', () => {
-    openDialog(`<div class="dialog__body"><h2 class="h-section">Стерти всі дані?</h2><p class="small muted">Профіль, збережені раціони, список покупок, ваші ціни та ключ AI буде видалено з цього пристрою.</p>
-      <form method="dialog" class="dialog__foot"><button class="btn btn--ghost" value="no">Скасувати</button><button class="btn btn--primary" value="yes">Стерти</button></form></div>`,
+  $('#ai-clear')?.addEventListener('click', () => {
+    S.ai = { key: '', model: S.ai.model };
+    store.set('ai', S.ai); renderMore(); toast(t('toast_prices_saved'));
+  });
+
+  $('#reset-all')?.addEventListener('click', () => {
+    openDialog(`<div class="dialog__body">
+      <h2 class="h-section">${t('reset_all_confirm')}</h2>
+      <p class="small muted">${t('reset_all_sub')}</p>
+      <form method="dialog" class="dialog__foot">
+        <button class="btn btn--ghost" value="no">${t('cancel')}</button>
+        <button class="btn btn--primary" value="yes">${t('delete')}</button>
+      </form></div>`,
       d => $('form', d).addEventListener('submit', ev => {
         if (ev.submitter?.value !== 'yes') return;
-        ['profile', 'banned', 'prices', 'list', 'saved', 'ai'].forEach(store.del);
+        ['profile', 'banned', 'prices', 'list', 'saved', 'ai', 'builder', 'currency', 'lang'].forEach(store.del);
         location.hash = '#/plan'; location.reload();
       }));
   });

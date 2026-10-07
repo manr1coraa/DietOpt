@@ -1,13 +1,13 @@
 {
-  "name": "DietOpt — раціон студента",
+  "name": "DietOpt — Smart Diet & Meal Optimizer",
   "short_name": "DietOpt",
-  "description": "Норми КБЖУ, найдешевше збалансоване меню, тижневий план і список покупок.",
-  "lang": "uk",
+  "description": "Smart nutrition norms, cheapest balanced menu, German grocery staples, weekly plans and shopping list.",
+  "lang": "en",
   "start_url": "./#/plan",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#f5f3ec",
-  "theme_color": "#2f6b3f",
+  "background_color": "#f7f9f7",
+  "theme_color": "#1b4d3e",
   "icons": [
     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
     { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
