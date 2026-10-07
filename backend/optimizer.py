@@ -1,5 +1,4 @@
-# optimizer.py — Алгоритм лінійного програмування (PuLP / CBC)
-# Кваліфікаційна робота: Литвин А.В., ХНУ ім. В.Н. Каразіна, 2026
+# Optional server-side menu optimizer (PuLP / CBC).
 
 import logging
 import random

@@ -5,9 +5,10 @@
    ═══════════════════════════════════════════════════════════════ */
 
 export const SUPPORTED_LANGS = ['de', 'en', 'ru', 'uk'];
-export const SUPPORTED_CURRENCIES = ['EUR', 'UAH'];
+export const SUPPORTED_MARKETS = ['de', 'ua'];
+export const MARKET_CURRENCIES = { de: 'EUR', ua: 'UAH' };
 
-// Detect initial language and currency
+// Detect initial language and market
 function getInitialLang() {
   try {
     const saved = localStorage.getItem('dietopt.lang');
@@ -21,18 +22,22 @@ function getInitialLang() {
   return 'de'; // Default to German for users living in Germany!
 }
 
-function getInitialCurrency() {
+function getInitialMarket() {
   try {
-    const saved = localStorage.getItem('dietopt.currency');
-    if (saved && SUPPORTED_CURRENCIES.includes(saved)) return saved;
-    const lang = getInitialLang();
-    return lang === 'uk' ? 'UAH' : 'EUR';
-  } catch { /* sandbox */ }
-  return 'EUR';
+    const saved = localStorage.getItem('dietopt.market');
+    if (saved && SUPPORTED_MARKETS.includes(saved)) return saved;
+    // One-time compatibility with the previous currency-only selector.
+    const oldCurrency = localStorage.getItem('dietopt.currency');
+    if (oldCurrency === 'UAH') return 'ua';
+    if (oldCurrency === 'EUR') return 'de';
+    return (navigator.language || '').toLowerCase().startsWith('uk') ? 'ua' : 'de';
+  } catch { /* storage may be disabled */ }
+  return 'de';
 }
 
 export let currentLang = getInitialLang();
-export let currentCurrency = getInitialCurrency();
+export let currentMarket = getInitialMarket();
+export let currentCurrency = MARKET_CURRENCIES[currentMarket];
 
 export function setLanguage(lang) {
   if (SUPPORTED_LANGS.includes(lang)) {
@@ -44,11 +49,20 @@ export function setLanguage(lang) {
   }
 }
 
+export function setMarket(market) {
+  if (!SUPPORTED_MARKETS.includes(market)) return;
+  currentMarket = market;
+  currentCurrency = MARKET_CURRENCIES[market];
+  try {
+    localStorage.setItem('dietopt.market', market);
+    localStorage.setItem('dietopt.currency', currentCurrency);
+  } catch {}
+}
+
+// Backward-compatible helper for old integrations: currency selects its market.
 export function setCurrency(curr) {
-  if (SUPPORTED_CURRENCIES.includes(curr)) {
-    currentCurrency = curr;
-    try { localStorage.setItem('dietopt.currency', curr); } catch {}
-  }
+  const market = Object.entries(MARKET_CURRENCIES).find(([, value]) => value === curr)?.[0];
+  if (market) setMarket(market);
 }
 
 export function fmtCost(val, curr = currentCurrency) {
@@ -82,21 +96,63 @@ export function getCatName(cat, lang = currentLang) {
 /* ─── Dictionaries ─────────────────────────────────────────── */
 export const I18N = {
   de: {
-    app_title: "DietOpt — Ausgewogene Ernährung zum kleinen Preis",
-    app_meta_desc: "Kostenloser Ernährungsplaner: Berechnet Kalorien & Makronährstoffe (Mifflin-St Jeor) und stellt das günstigste Menü zusammen — mit Einkaufsliste und Supermarktpreisen in Deutschland.",
+    app_title: "DietOpt — Essen planen, clever einkaufen",
+    app_meta_desc: "Ein einfacher Menü- und Einkaufsplaner für Deutschland und die Ukraine. Kostenlos und ohne Konto.",
     
     // Topnav
-    nav_plan: "Plan",
-    nav_builder: "Baukasten",
+    nav_plan: "Menü",
+    nav_builder: "Selbst planen",
     nav_week: "Woche",
     nav_list: "Einkauf",
     nav_foods: "Lebensmittel",
     nav_more: "Mehr",
     region_label: "Region & Währung:",
 
+    // Region, privacy and backup
+    market_de: "🇩🇪 Deutschland · €",
+    market_ua: "🇺🇦 Ukraine · ₴",
+    market_basics: "Grundprodukte",
+    market_price_note: "Preise sind Richtwerte, keine Live-Preise. Du kannst sie pro 100 g an deinen Laden anpassen.",
+    tools_title: "Weitere Funktionen",
+    foods_empty_sub: "Ändere den Suchbegriff oder den Filter.",
+    foods_empty_title: "Keine Produkte gefunden",
+    all_cats: "Alle Lebensmittel",
+    price_per_100g: "pro 100 g",
+    saved_delete: "Löschen",
+    saved_open: "Öffnen",
+    preset_student: "🇺🇦 Günstig & alltagstauglich",
+    preset_home: "🇺🇦 Hausmannskost",
+    preset_sport: "🇺🇦 Sportlich",
+    preset_balanced: "🌍 International · ausgewogen",
+    foods_count: "Lebensmittel",
+    price_estimate_short: "Richtpreise",
+    profile_advanced: "Weitere Einstellungen",
+    hero_action_manual: "Menü selbst zusammenstellen",
+    hero_action_week: "Woche planen",
+    storage_title: "Deine Daten",
+    storage_local: "Profil, Einkaufsliste, gespeicherte Menüs und eigene Preise bleiben in diesem Browser. Sie werden nicht an GitHub gesendet.",
+    storage_caveat: "Beim Schließen der Seite bleiben sie erhalten. Beim Löschen der Browserdaten oder im privaten Modus können sie verloren gehen.",
+    storage_shared: "„Teilen“ verschickt eine Kopie als Text. Eine Live-Synchronisierung zwischen Geräten gibt es derzeit nicht.",
+    storage_ai: "KI-Rezepte sind optional. Wenn du sie nutzt, werden Menü und Profil an Google übermittelt.",
+    storage_market_detail: "Aktiver Markt: {0}. Einstellungen und Preise sind je Markt getrennt.",
+    backup_export: "Backup herunterladen",
+    backup_import: "Backup importieren",
+    backup_exported: "Backup heruntergeladen.",
+    backup_imported: "Backup importiert.",
+    backup_invalid: "Das ist kein gültiges DietOpt-Backup.",
+    backup_market_mismatch: "Dieses Backup gehört zu einem anderen Markt. Wähle zuerst diesen Markt aus.",
+    storage_status_local: "Lokale Speicherung verfügbar",
+    storage_status_session: "Lokale Speicherung nicht verfügbar; Daten bleiben nur bis zum Schließen erhalten.",
+    market_changed: "Markt gewechselt. Deine dort gespeicherten Daten wurden geladen.",
+    tool_builder: "Menü selbst zusammenstellen",
+    tool_week: "Wochenplan",
+    tool_foods: "Lebensmittel und Preise",
+    more_nutrition: "Nährwerte, Rezepte und Details",
+    details_compare: "Menüs vergleichen",
+
     // Profile Form
-    profile_title: "Dein Profil",
-    profile_sub: "Alle Berechnungen laufen lokal auf deinem Gerät.",
+    profile_title: "Dein Tagesmenü",
+    profile_sub: "Deine Einstellungen bleiben auf diesem Gerät.",
     gender: "Geschlecht",
     gender_male: "Mann",
     gender_female: "Frau",
@@ -125,15 +181,15 @@ export const I18N = {
     diet_vegan: "Vegan",
     allergies: "Unverträglichkeiten / Ausschluss",
     allergies_extra_ph: "Weitere mit Komma: Schweinefleisch, Tomaten…",
-    calc_btn: "Optimalen Plan berechnen",
+    calc_btn: "Tagesmenü erstellen",
 
     // Plan Hero empty state
-    hero_eyebrow: "Kostenlos · Ohne Registrierung · Funktioniert offline",
-    hero_title: "Volle Nährwerte.<br>Minimaler Preis.",
-    hero_lead: "DietOpt ermittelt deinen Kalorien- und Makronährstoffbedarf und berechnet per linearer Programmierung das günstigste vollwertige Tagesmenü aus 500+ Supermarkt-Lebensmitteln.",
-    hero_step1: "Profil ausfüllen — 30 Sekunden",
-    hero_step2: "Ausgewogenes 4-Mahlzeiten-Menü erhalten",
-    hero_step3: "Zutaten direkt in die Einkaufsliste übernehmen",
+    hero_eyebrow: "Einfach planen. Gut einkaufen.",
+    hero_title: "Was essen wir heute?",
+    hero_lead: "Wähle dein Budget. DietOpt schlägt ein Tagesmenü vor und erstellt deine Einkaufsliste.",
+    hero_step1: "Budget und Profil einstellen",
+    hero_step2: "Menü für den Tag ansehen",
+    hero_step3: "Zutaten in die Einkaufsliste übernehmen",
 
     // Plan Result
     menu_for_day: "Tagesmenü",
@@ -167,7 +223,7 @@ export const I18N = {
     recipes_ai_btn: "KI-Rezepte (Gemini)",
     compare_title: "Günstigster Plan vs. Standard-Einkauf",
     compare_tag: "{0}% günstiger",
-    compare_sub: "Der Standardkorb zeigt einen typischen Einkauf, der dein Budget fast ausschöpft. Die Nährwerte sind bei beiden optimal.",
+    compare_sub: "Der Standardkorb zeigt einen typischen Einkauf, der dein Budget nutzt. Beide Menüs erfüllen dieselben Nährwertziele.",
     metric_name: "Kennzahl",
     metric_cheapest: "Günstigster",
     metric_standard: "Standard",
@@ -187,11 +243,11 @@ export const I18N = {
 
     // Builder (Baukasten)
     builder_title: "Mahlzeiten-Baukasten",
-    builder_subtitle: "Stelle deine Mahlzeiten flexibel zusammen mit deutschen Supermarktpreisen und Live-Nährwerten.",
-    builder_presets: "Vorlagen für Deutschland:",
+    builder_subtitle: "Stelle Mahlzeiten zusammen und behalte Preis und Nährwerte im Blick.",
+    builder_presets: "Vorlagen für Deutschland",
     preset_fitness: "🇩🇪 Fitness-Klassiker (Quark, Haferflocken, Hähnchen)",
     preset_abendbrot: "🇩🇪 Abendbrot & Alltag (Vollkornbrot, Gouda, Lachs)",
-    preset_budget: "🇩🇪 Aldi/Lidl Spar-Plan (< 5 €/Tag)",
+    preset_budget: "🇩🇪 Günstig einkaufen (< 5 €/Tag)",
     preset_clear: "Leeren",
     builder_progress_title: "Tagesübersicht & Nährwert-Balance",
     builder_cost: "Tagespreis",
@@ -208,7 +264,7 @@ export const I18N = {
 
     // Week Plan
     week_title: "7-Tage-Wochenplan",
-    week_sub: "Sieben abwechslungsreiche Menüs passend zu deinen Zielen und deinem Budget.",
+    week_sub: "Sieben einfache Tagesmenüs passend zu deinem Budget.",
     week_btn_build: "Wochenplan erstellen",
     week_empty_title: "7 Tage — 7 verschiedene Menüs",
     week_empty_sub: "Klicke auf «Wochenplan erstellen», um deinen Plan mit gemeinsamer Einkaufsliste zu generieren.",
@@ -223,20 +279,20 @@ export const I18N = {
 
     // Shopping List
     list_title: "Einkaufsliste",
-    list_sub: "Hake Erledigtes direkt im Supermarkt ab. Bleibt auf deinem Smartphone gespeichert.",
+    list_sub: "Wird auf diesem Gerät gespeichert. Für andere: Liste senden oder Backup exportieren.",
     list_empty_title: "Deine Einkaufsliste ist leer",
     list_empty_sub: "Erstelle einen Ernährungsplan oder nutze den Baukasten und klicke auf «In die Einkaufsliste».",
     list_to_buy_left: "Noch offen für {0} · {1} von {2} gekauft",
     list_clear_btn: "Leeren",
-    list_share_btn: "Teilen",
+    list_share_btn: "Liste senden",
     list_clear_confirm: "Einkaufsliste leeren?",
     list_clear_confirm_sub: "Alle Zutaten werden aus der Einkaufsliste entfernt.",
     cancel: "Abbrechen",
     clear: "Leeren",
 
     // Foods Database
-    foods_title: "Lebensmittel-Datenbank",
-    foods_sub: "Nährwerte und Supermarktpreise pro 100 g. Klicke auf ein Produkt zum Anpassen oder Ausschließen.",
+    foods_title: "Lebensmittel",
+    foods_sub: "Suche Produkte und passe den Preis an deinen Laden an.",
     foods_search_ph: "Suche: Magerquark, Haferflocken, Hähnchen, Apfel, Brokkoli…",
     sort_name: "Nach Name",
     sort_price: "Günstigste zuerst",
@@ -259,7 +315,7 @@ export const I18N = {
     saved_diets_title: "Gespeicherte Pläne",
     saved_empty: "Hier erscheinen Pläne, die du mit «Speichern» sicherst.",
     install_pwa_title: "Als Smartphone-App installieren",
-    install_pwa_sub: "DietOpt ist eine vollwertige Offline-PWA: Du kannst sie auf deinen Home-Bildschirm legen und wie eine native App nutzen.",
+    install_pwa_sub: "Füge DietOpt zum Startbildschirm hinzu und nutze es auch offline.",
     install_btn: "App installieren",
     install_ios: "iPhone (Safari): Teilen-Symbol ➔ «Zum Home-Bildschirm».",
     install_android: "Android (Chrome): Menü ⋮ ➔ «Zum Startbildschirm hinzufügen» oder «App installieren».",
@@ -272,7 +328,7 @@ export const I18N = {
     overrides_empty: "Du hast noch keine individuellen Preise festgelegt oder Zutaten ausgeschlossen.",
     reset_override: "Zurücksetzen",
     about_title: "Über DietOpt",
-    about_text: "DietOpt ist ein intelligentes System zur Optimierung des Ernährungsplans auf wissenschaftlicher Basis (Mifflin-St Jeor) und mathematischer Optimierung (Simplex-Algorithmus).",
+    about_text: "Ein einfacher Menü- und Einkaufsplaner mit getrennten Preislisten für Deutschland und die Ukraine.",
     reset_all_data: "Alle lokalen Daten zurücksetzen",
     reset_all_confirm: "Alle Daten löschen?",
     reset_all_sub: "Dein Profil, gespeicherte Pläne, Einkaufsliste und benutzerdefinierte Preise werden auf diesem Gerät unwiderruflich gelöscht.",
@@ -285,19 +341,61 @@ export const I18N = {
   },
 
   en: {
-    app_title: "DietOpt — Balanced Diet on a Budget",
-    app_meta_desc: "Free nutrition planner: Calculates calories and macros (Mifflin-St Jeor) and creates the cheapest balanced daily and weekly menu — with shopping lists and supermarket prices.",
+    app_title: "DietOpt — Plan meals, shop smarter",
+    app_meta_desc: "A simple meal and shopping planner for Germany and Ukraine. Free, no account required.",
     
-    nav_plan: "Plan",
-    nav_builder: "Builder",
+    nav_plan: "Meals",
+    nav_builder: "Build",
     nav_week: "Week",
     nav_list: "Shopping",
     nav_foods: "Foods",
     nav_more: "More",
     region_label: "Region & Currency:",
 
-    profile_title: "Your Profile",
-    profile_sub: "All data stays private on your local device.",
+    // Region, privacy and backup
+    market_de: "🇩🇪 Germany · €",
+    market_ua: "🇺🇦 Ukraine · ₴",
+    market_basics: "Local basics",
+    market_price_note: "Prices are estimates, not live store prices. Adjust them for your shop per 100 g.",
+    tools_title: "More tools",
+    foods_empty_sub: "Try a different search or filter.",
+    foods_empty_title: "No foods found",
+    all_cats: "All foods",
+    price_per_100g: "per 100 g",
+    saved_delete: "Delete",
+    saved_open: "Open",
+    preset_student: "🇺🇦 Affordable everyday",
+    preset_home: "🇺🇦 Home-style",
+    preset_sport: "🇺🇦 Sport",
+    preset_balanced: "🌍 International · balanced",
+    foods_count: "foods",
+    price_estimate_short: "estimated prices",
+    profile_advanced: "More settings",
+    hero_action_manual: "Build a menu yourself",
+    hero_action_week: "Plan a week",
+    storage_title: "Your data",
+    storage_local: "Your profile, shopping list, saved menus and custom prices stay in this browser. They are not sent to GitHub.",
+    storage_caveat: "They remain after closing the page. Clearing browser data or using private browsing can remove them.",
+    storage_shared: "“Share” sends a text copy. Live syncing between devices is not available yet.",
+    storage_ai: "AI recipes are optional. If used, your menu and profile are sent to Google.",
+    storage_market_detail: "Active market: {0}. Settings and prices are kept separately for each market.",
+    backup_export: "Download backup",
+    backup_import: "Import backup",
+    backup_exported: "Backup downloaded.",
+    backup_imported: "Backup imported.",
+    backup_invalid: "This is not a valid DietOpt backup.",
+    backup_market_mismatch: "This backup belongs to another market. Switch to that market first.",
+    storage_status_local: "Local storage is available",
+    storage_status_session: "Local storage is unavailable; data will last only until this page closes.",
+    market_changed: "Market changed. Saved data for this market has been loaded.",
+    tool_builder: "Build a menu yourself",
+    tool_week: "Weekly plan",
+    tool_foods: "Foods and prices",
+    more_nutrition: "Nutrition, recipes and details",
+    details_compare: "Compare menus",
+
+    profile_title: "Your daily menu",
+    profile_sub: "Your settings stay on this device.",
     gender: "Gender",
     gender_male: "Male",
     gender_female: "Female",
@@ -326,14 +424,14 @@ export const I18N = {
     diet_vegan: "Vegan",
     allergies: "Exclusions & Allergies",
     allergies_extra_ph: "Other comma separated: pork, tomato…",
-    calc_btn: "Generate Optimal Diet",
+    calc_btn: "Build today’s menu",
 
-    hero_eyebrow: "Free · No Sign-up · Works Offline",
-    hero_title: "Full Nutrition.<br>Minimum Cost.",
-    hero_lead: "DietOpt calculates your target calories and macros, then uses linear programming to build the most cost-effective full-day menu from 500+ supermarket foods.",
-    hero_step1: "Complete your profile — 30 seconds",
-    hero_step2: "Get an optimal 4-meal daily menu",
-    hero_step3: "Add ingredients directly to your shopping list",
+    hero_eyebrow: "Plan simply. Shop well.",
+    hero_title: "What shall we eat today?",
+    hero_lead: "Choose a budget. DietOpt suggests a day menu and prepares your shopping list.",
+    hero_step1: "Set your budget and profile",
+    hero_step2: "Review today’s menu",
+    hero_step3: "Add ingredients to your list",
 
     menu_for_day: "Daily Menu",
     tab_cheapest: "Lowest Cost",
@@ -366,7 +464,7 @@ export const I18N = {
     recipes_ai_btn: "AI Chef Recipes",
     compare_title: "Lowest Cost vs. Standard Basket",
     compare_tag: "{0}% cheaper",
-    compare_sub: "The standard basket shows a typical student groceries run that utilizes most of your budget. Both meet identical nutrition goals.",
+    compare_sub: "The standard basket is a typical shop using most of the budget. Both menus meet the same nutrition targets.",
     metric_name: "Metric",
     metric_cheapest: "Lowest Cost",
     metric_standard: "Standard",
@@ -385,11 +483,11 @@ export const I18N = {
     edit_profile_btn: "Edit profile",
 
     builder_title: "Interactive Diet Builder",
-    builder_subtitle: "Assemble your daily meals with German supermarket staples and track calories & macros in real time.",
-    builder_presets: "German Diet Presets:",
+    builder_subtitle: "Put meals together and keep an eye on price and nutrition.",
+    builder_presets: "Presets for this region",
     preset_fitness: "🇩🇪 Fitness Classic (Quark, Oats, Chicken)",
     preset_abendbrot: "🇩🇪 German Abendbrot & Everyday (Bread, Gouda, Salmon)",
-    preset_budget: "🇩🇪 Aldi/Lidl Student Saver (< 5 €/day)",
+    preset_budget: "🇩🇪 Low-cost groceries (< €5/day)",
     preset_clear: "Clear",
     builder_progress_title: "Daily Summary & Macro Balance",
     builder_cost: "Daily Cost",
@@ -405,7 +503,7 @@ export const I18N = {
     builder_custom_g: "Grams",
 
     week_title: "7-Day Weekly Plan",
-    week_sub: "Seven varied daily menus tailored to your profile and budget.",
+    week_sub: "Seven simple day menus based on your budget.",
     week_btn_build: "Generate Weekly Plan",
     week_empty_title: "Seven days — Seven unique menus",
     week_empty_sub: "Click «Generate Weekly Plan» to build your week and aggregated grocery list.",
@@ -419,19 +517,19 @@ export const I18N = {
     week_details_btn: "View Details",
 
     list_title: "Shopping List",
-    list_sub: "Check off items directly in the supermarket. Saved on your device.",
+    list_sub: "Saved on this device. To share, send a copy or export a backup.",
     list_empty_title: "Your shopping list is empty",
     list_empty_sub: "Create a diet or use the Builder, then click «Add to Shopping List».",
     list_to_buy_left: "remaining: {0} · {1} of {2} bought",
     list_clear_btn: "Clear",
-    list_share_btn: "Share",
+    list_share_btn: "Send list",
     list_clear_confirm: "Clear shopping list?",
     list_clear_confirm_sub: "All items will be removed from your list.",
     cancel: "Cancel",
     clear: "Clear",
 
-    foods_title: "Food Database",
-    foods_sub: "Nutritional values and supermarket prices per 100g. Click any food to edit price or exclude.",
+    foods_title: "Foods",
+    foods_sub: "Search foods and adjust prices for your local shop.",
     foods_search_ph: "Search: quark, oats, chicken, apple, broccoli…",
     sort_name: "By name",
     sort_price: "Lowest price",
@@ -453,7 +551,7 @@ export const I18N = {
     saved_diets_title: "Saved Diets",
     saved_empty: "Plans you save with the «Save» button will appear here.",
     install_pwa_title: "Install on Mobile",
-    install_pwa_sub: "DietOpt is a Progressive Web App (PWA): you can add it to your home screen and use it offline.",
+    install_pwa_sub: "Add DietOpt to your home screen and use it offline.",
     install_btn: "Install App",
     install_ios: "iPhone (Safari): Share button ➔ «Add to Home Screen».",
     install_android: "Android (Chrome): Menu ⋮ ➔ «Add to Home Screen» or «Install app».",
@@ -466,7 +564,7 @@ export const I18N = {
     overrides_empty: "You have not set any custom prices or excluded foods yet.",
     reset_override: "Reset",
     about_title: "About DietOpt",
-    about_text: "DietOpt is an intelligent nutrition planning tool combining Mifflin-St Jeor caloric standards and Simplex linear programming.",
+    about_text: "A simple meal and shopping planner with separate price lists for Germany and Ukraine.",
     reset_all_data: "Reset all local data",
     reset_all_confirm: "Reset all data?",
     reset_all_sub: "Profile, saved diets, shopping list, custom prices and AI key will be permanently erased from this device.",
@@ -479,19 +577,61 @@ export const I18N = {
   },
 
   ru: {
-    app_title: "DietOpt — Оптимальный рацион питания под бюджет",
-    app_meta_desc: "Бесплатный планировщик питания: рассчитывает нормы КБЖУ (Миффлин — Сан Жеор) и подбирает самое дешёвое меню на день и неделю — со списком покупок и рецептами.",
+    app_title: "DietOpt — меню и список покупок",
+    app_meta_desc: "Простой планировщик меню и покупок для Германии и Украины. Бесплатно, без аккаунта.",
     
-    nav_plan: "Рацион",
-    nav_builder: "Конструктор",
+    nav_plan: "Меню",
+    nav_builder: "Собрать",
     nav_week: "Неделя",
     nav_list: "Покупки",
     nav_foods: "Продукты",
     nav_more: "Ещё",
     region_label: "Регион и валюта:",
 
-    profile_title: "Ваш профиль",
-    profile_sub: "Все данные хранятся только на вашем устройстве.",
+    // Region, privacy and backup
+    market_de: "🇩🇪 Германия · €",
+    market_ua: "🇺🇦 Украина · ₴",
+    market_basics: "Основные продукты",
+    market_price_note: "Цены ориентировочные, не обновляются в реальном времени. Их можно изменить под свой магазин за 100 г.",
+    tools_title: "Дополнительные функции",
+    foods_empty_sub: "Измени запрос или фильтр.",
+    foods_empty_title: "Ничего не найдено",
+    all_cats: "Все продукты",
+    price_per_100g: "за 100 г",
+    saved_delete: "Удалить",
+    saved_open: "Открыть",
+    preset_student: "🇺🇦 Бюджетный на каждый день",
+    preset_home: "🇺🇦 Домашний рацион",
+    preset_sport: "🇺🇦 Спортивный",
+    preset_balanced: "🌍 Международный · сбалансированный",
+    foods_count: "продуктов",
+    price_estimate_short: "примерные цены",
+    profile_advanced: "Дополнительные настройки",
+    hero_action_manual: "Собрать меню вручную",
+    hero_action_week: "План на неделю",
+    storage_title: "Твои данные",
+    storage_local: "Профиль, список покупок, сохранённые меню и свои цены хранятся в этом браузере. Они не отправляются на GitHub.",
+    storage_caveat: "После закрытия страницы данные остаются. Они могут удалиться при очистке данных браузера или в режиме инкогнито.",
+    storage_shared: "Кнопка «Поделиться» отправляет текстовую копию. Синхронизации между устройствами пока нет.",
+    storage_ai: "ИИ-рецепты необязательны. При их использовании меню и профиль отправляются в Google.",
+    storage_market_detail: "Выбранный рынок: {0}. Настройки и цены хранятся отдельно для каждого рынка.",
+    backup_export: "Скачать резервную копию",
+    backup_import: "Импортировать копию",
+    backup_exported: "Резервная копия скачана.",
+    backup_imported: "Резервная копия импортирована.",
+    backup_invalid: "Это не резервная копия DietOpt.",
+    backup_market_mismatch: "Эта копия относится к другому рынку. Сначала выбери его.",
+    storage_status_local: "Локальное сохранение доступно",
+    storage_status_session: "Локальное сохранение недоступно; данные пропадут после закрытия страницы.",
+    market_changed: "Рынок изменён. Загружены сохранённые данные для него.",
+    tool_builder: "Собрать меню вручную",
+    tool_week: "План на неделю",
+    tool_foods: "Продукты и цены",
+    more_nutrition: "Пищевая ценность, рецепты и детали",
+    details_compare: "Сравнить меню",
+
+    profile_title: "Меню на день",
+    profile_sub: "Настройки хранятся на этом устройстве.",
     gender: "Пол",
     gender_male: "Мужчина",
     gender_female: "Женщина",
@@ -520,14 +660,14 @@ export const I18N = {
     diet_vegan: "Веганское",
     allergies: "Исключить / аллергия",
     allergies_extra_ph: "Другое через запятую: свинина, томаты…",
-    calc_btn: "Рассчитать оптимальный рацион",
+    calc_btn: "Составить меню",
 
-    hero_eyebrow: "Бесплатно · Без регистрации · Работает офлайн",
-    hero_title: "Полноценное питание<br>за минимальную цену",
-    hero_lead: "DietOpt считает норму калорий и белков-жиров-углеводов, а затем методом линейного программирования подбирает из 500+ продуктов самое выгодное меню на день — со списком покупок и простыми рецептами.",
-    hero_step1: "Заполните профиль — 30 секунд",
-    hero_step2: "Получите сбалансированное меню на 4 приёма",
-    hero_step3: "Добавьте продукты в список покупок",
+    hero_eyebrow: "Планируй просто. Покупай разумно.",
+    hero_title: "Что приготовим сегодня?",
+    hero_lead: "Укажи бюджет — DietOpt предложит меню на день и соберёт список покупок.",
+    hero_step1: "Укажи бюджет и параметры",
+    hero_step2: "Посмотри меню на день",
+    hero_step3: "Добавь продукты в список покупок",
 
     menu_for_day: "Меню на день",
     tab_cheapest: "Самый дешёвый",
@@ -560,7 +700,7 @@ export const I18N = {
     recipes_ai_btn: "Рецепты от AI (Gemini)",
     compare_title: "Самый дешёвый vs Обычный",
     compare_tag: "дешевле на {0}%",
-    compare_sub: "«Обычный» — реалистичная корзина, расходующая почти весь бюджет. Нормы КБЖУ в обоих вариантах соблюдены.",
+    compare_sub: "Обычная корзина расходует большую часть бюджета. Оба меню соответствуют одним и тем же целям по питанию.",
     metric_name: "Показатель",
     metric_cheapest: "Самый дешёвый",
     metric_standard: "Обычный",
@@ -579,11 +719,11 @@ export const I18N = {
     edit_profile_btn: "Изменить профиль",
 
     builder_title: "Конструктор рациона",
-    builder_subtitle: "Складывайте рацион вручную из немецких продуктов (Rewe, Lidl, Aldi) и следите за калориями и бюджетом на лету.",
-    builder_presets: "Готовые шаблоны для Германии:",
+    builder_subtitle: "Собери блюда и следи за стоимостью и питательной ценностью.",
+    builder_presets: "Шаблоны для этого региона",
     preset_fitness: "🇩🇪 Немецкий фитнес (творог Magerquark, овсянка, курица)",
     preset_abendbrot: "🇩🇪 Традиционный немецкий день (бутерброды, лосось, творог)",
-    preset_budget: "🇩🇪 Студенческий эконом (< 5 €/день в Aldi/Lidl)",
+    preset_budget: "🇩🇪 Экономная корзина (< 5 €/день)",
     preset_clear: "Очистить",
     builder_progress_title: "Сводка за день и баланс КБЖУ",
     builder_cost: "Стоимость за день",
@@ -599,7 +739,7 @@ export const I18N = {
     builder_custom_g: "Граммы",
 
     week_title: "План на неделю",
-    week_sub: "Семь разных меню под ваш профиль — чтобы питание было разнообразным.",
+    week_sub: "Семь простых меню с учётом твоего бюджета.",
     week_btn_build: "Составить неделю",
     week_empty_title: "Семь дней — семь разных меню",
     week_empty_sub: "Нажмите «Составить неделю», чтобы получить недельный план и общий список покупок.",
@@ -613,19 +753,19 @@ export const I18N = {
     week_details_btn: "Подробнее",
 
     list_title: "Список покупок",
-    list_sub: "Отмечайте купленное прямо в магазине. Список сохраняется на вашем устройстве.",
+    list_sub: "Список хранится на этом устройстве. Чтобы поделиться, отправь копию или экспортируй резервную копию.",
     list_empty_title: "Список покупок пуст",
     list_empty_sub: "Составьте рацион или используйте Конструктор и нажмите «В список покупок».",
     list_to_buy_left: "осталось купить на {0} · куплено {1} из {2}",
     list_clear_btn: "Очистить",
-    list_share_btn: "Поделиться",
+    list_share_btn: "Отправить список",
     list_clear_confirm: "Очистить список покупок?",
     list_clear_confirm_sub: "Все продукты будут удалены из списка.",
     cancel: "Отмена",
     clear: "Очистить",
 
-    foods_title: "База продуктов",
-    foods_sub: "Пищевая ценность и цены за 100 г. Нажмите на продукт, чтобы указать свою цену или исключить его.",
+    foods_title: "Продукты",
+    foods_sub: "Ищи продукты и указывай цены в своём магазине.",
     foods_search_ph: "Поиск: творог, овсянка, курица, яблоко, брокколи…",
     sort_name: "По названию",
     sort_price: "Сначала дешёвые",
@@ -647,7 +787,7 @@ export const I18N = {
     saved_diets_title: "Сохранённые рационы",
     saved_empty: "Здесь появятся рационы, которые вы сохраните кнопкой «Сохранить».",
     install_pwa_title: "Установить на телефон",
-    install_pwa_sub: "DietOpt — веб-приложение (PWA): его можно добавить на главный экран и открывать без браузера и даже без интернета.",
+    install_pwa_sub: "Добавь DietOpt на главный экран — приложение работает офлайн.",
     install_btn: "Установить приложение",
     install_ios: "iPhone (Safari): кнопка «Поделиться» ➔ «На экран Домой».",
     install_android: "Android (Chrome): меню ⋮ ➔ «Добавить на главный экран» или «Установить».",
@@ -660,7 +800,7 @@ export const I18N = {
     overrides_empty: "Вы пока не меняли цены и не исключали продукты.",
     reset_override: "Сбросить",
     about_title: "О проекте DietOpt",
-    about_text: "DietOpt — система оптимизации рациона питания на основе формулы Миффлина — Сан Жеора и симплекс-метода линейного программирования.",
+    about_text: "Простой планировщик меню и покупок с отдельными ценами для Германии и Украины.",
     reset_all_data: "Стереть все мои данные",
     reset_all_confirm: "Стереть все данные?",
     reset_all_sub: "Профиль, сохранённые рационы, список покупок, ваши цены и ключ AI будут удалены с этого устройства.",
@@ -673,19 +813,61 @@ export const I18N = {
   },
 
   uk: {
-    app_title: "DietOpt — раціон студента за мінімальну ціну",
-    app_meta_desc: "Безкоштовний планувальник харчування: розраховує норми КБЖУ і складає найдешевший збалансований раціон на день і тиждень, зі списком покупок і рецептами.",
+    app_title: "DietOpt — меню та список покупок",
+    app_meta_desc: "Зручний планувальник меню й покупок для Німеччини та України. Безкоштовно, без акаунта.",
     
-    nav_plan: "Раціон",
-    nav_builder: "Конструктор",
+    nav_plan: "Меню",
+    nav_builder: "Скласти",
     nav_week: "Тиждень",
     nav_list: "Покупки",
     nav_foods: "Продукти",
     nav_more: "Ще",
     region_label: "Регіон та валюта:",
 
-    profile_title: "Ваш профіль",
-    profile_sub: "Дані залишаються лише на вашому пристрої.",
+    // Region, privacy and backup
+    market_de: "🇩🇪 Німеччина · €",
+    market_ua: "🇺🇦 Україна · ₴",
+    market_basics: "Основні продукти",
+    market_price_note: "Ціни орієнтовні, не оновлюються наживо. Їх можна змінити під свій магазин за 100 г.",
+    tools_title: "Інші функції",
+    foods_empty_sub: "Зміни запит або фільтр.",
+    foods_empty_title: "Нічого не знайдено",
+    all_cats: "Усі продукти",
+    price_per_100g: "за 100 г",
+    saved_delete: "Видалити",
+    saved_open: "Відкрити",
+    preset_student: "🇺🇦 Бюджетний на щодень",
+    preset_home: "🇺🇦 Домашній раціон",
+    preset_sport: "🇺🇦 Спортивний",
+    preset_balanced: "🌍 Міжнародний · збалансований",
+    foods_count: "продуктів",
+    price_estimate_short: "орієнтовні ціни",
+    profile_advanced: "Додаткові налаштування",
+    hero_action_manual: "Скласти меню вручну",
+    hero_action_week: "План на тиждень",
+    storage_title: "Твої дані",
+    storage_local: "Профіль, список покупок, збережені меню та власні ціни зберігаються в цьому браузері. Вони не надсилаються на GitHub.",
+    storage_caveat: "Після закриття сторінки дані залишаються. Вони можуть видалитися після очищення даних браузера або в режимі інкогніто.",
+    storage_shared: "Кнопка «Поділитися» надсилає текстову копію. Синхронізації між пристроями поки немає.",
+    storage_ai: "AI-рецепти необов’язкові. Якщо скористатися ними, меню та профіль надсилаються до Google.",
+    storage_market_detail: "Обраний ринок: {0}. Налаштування та ціни зберігаються окремо для кожного ринку.",
+    backup_export: "Завантажити резервну копію",
+    backup_import: "Імпортувати копію",
+    backup_exported: "Резервну копію завантажено.",
+    backup_imported: "Резервну копію імпортовано.",
+    backup_invalid: "Це не резервна копія DietOpt.",
+    backup_market_mismatch: "Ця копія належить до іншого ринку. Спочатку вибери його.",
+    storage_status_local: "Локальне збереження доступне",
+    storage_status_session: "Локальне збереження недоступне; дані зникнуть після закриття сторінки.",
+    market_changed: "Ринок змінено. Завантажено збережені дані для нього.",
+    tool_builder: "Скласти меню вручну",
+    tool_week: "План на тиждень",
+    tool_foods: "Продукти й ціни",
+    more_nutrition: "Харчова цінність, рецепти й деталі",
+    details_compare: "Порівняти меню",
+
+    profile_title: "Меню на день",
+    profile_sub: "Налаштування зберігаються на цьому пристрої.",
     gender: "Стать",
     gender_male: "Чоловік",
     gender_female: "Жінка",
@@ -714,14 +896,14 @@ export const I18N = {
     diet_vegan: "Веган",
     allergies: "Не їм / алергія",
     allergies_extra_ph: "Інше через кому: томат, свинина…",
-    calc_btn: "Скласти раціон",
+    calc_btn: "Скласти меню",
 
-    hero_eyebrow: "Безкоштовно · без реєстрації · працює офлайн",
-    hero_title: "Повноцінне харчування<br>за мінімальну ціну",
-    hero_lead: "DietOpt рахує вашу норму калорій і білків-жирів-вуглеводів, а потім методом лінійного програмування підбирає з 500+ продуктів найдешевше меню на день — зі списком покупок і простими рецептами.",
-    hero_step1: "Заповніть профіль — 30 секунд",
-    hero_step2: "Отримайте меню на 4 прийоми їжі",
-    hero_step3: "Додайте продукти до списку покупок",
+    hero_eyebrow: "Плануй просто. Купуй розумно.",
+    hero_title: "Що приготуємо сьогодні?",
+    hero_lead: "Вкажи бюджет — DietOpt запропонує меню на день і збере список покупок.",
+    hero_step1: "Вкажи бюджет і параметри",
+    hero_step2: "Переглянь меню на день",
+    hero_step3: "Додай продукти до списку покупок",
 
     menu_for_day: "Меню на день",
     tab_cheapest: "Найдешевший",
@@ -754,7 +936,7 @@ export const I18N = {
     recipes_ai_btn: "Рецепти від AI",
     compare_title: "Найдешевший vs звичайний",
     compare_tag: "дешевше на {0}%",
-    compare_sub: "«Звичайний» — реалістичний кошик, який студент купив би, витративши майже весь бюджет. Норми КБЖУ в обох однакові.",
+    compare_sub: "Звичайний кошик використовує більшу частину бюджету. Обидва меню відповідають однаковим цілям харчування.",
     metric_name: "Показник",
     metric_cheapest: "Найдешевший",
     metric_standard: "Звичайний",
@@ -773,11 +955,11 @@ export const I18N = {
     edit_profile_btn: "Змінити профіль",
 
     builder_title: "Конструктор раціону",
-    builder_subtitle: "Складайте раціон власноруч із німецьких або українських продуктів та відстежуйте калорії й вартість наживо.",
-    builder_presets: "Готові шаблони для Німеччини:",
+    builder_subtitle: "Складай страви та стеж за вартістю і поживністю.",
+    builder_presets: "Шаблони для цього регіону",
     preset_fitness: "🇩🇪 Німецький фітнес (сир Magerquark, вівсянка, курка)",
     preset_abendbrot: "🇩🇪 Німецький щоденний (хліб, гауда, лосось, кварк)",
-    preset_budget: "🇩🇪 Студентський економ (< 5 €/день в Aldi/Lidl)",
+    preset_budget: "🇩🇪 Економний кошик (< 5 €/день)",
     preset_clear: "Очистити",
     builder_progress_title: "Підсумок за день та баланс КБЖУ",
     builder_cost: "Вартість за день",
@@ -793,7 +975,7 @@ export const I18N = {
     builder_custom_g: "Грами",
 
     week_title: "План на тиждень",
-    week_sub: "Сім різних меню під ваш профіль — щоб не їсти одне й те саме.",
+    week_sub: "Сім простих меню на кожен день відповідно до бюджету.",
     week_btn_build: "Скласти тиждень",
     week_empty_title: "Сім днів — сім різних меню",
     week_empty_sub: "Натисніть «Скласти тиждень», щоб отримати план і загальний список покупок.",
@@ -807,19 +989,19 @@ export const I18N = {
     week_details_btn: "Детальніше",
 
     list_title: "Список покупок",
-    list_sub: "Відмічайте куплене прямо в магазині. Список зберігається на телефоні.",
+    list_sub: "Список зберігається на цьому пристрої. Щоб поділитися, надішли копію або експортуй резервну копію.",
     list_empty_title: "Список порожній",
     list_empty_sub: "Складіть раціон або тижневий план і натисніть «У список покупок».",
     list_to_buy_left: "залишилось купити на {0} · куплено {1} з {2}",
     list_clear_btn: "Очистити",
-    list_share_btn: "Поділитися",
+    list_share_btn: "Надіслати список",
     list_clear_confirm: "Очистити список покупок?",
     list_clear_confirm_sub: "Усі продукти буде видалено зі списку.",
     cancel: "Скасувати",
     clear: "Очистити",
 
-    foods_title: "База продуктів",
-    foods_sub: "Харчова цінність і ціна за 100 г. Торкніться продукту, щоб указати ціну у вашому магазині або виключити його.",
+    foods_title: "Продукти",
+    foods_sub: "Шукай продукти та вказуй ціни у своєму магазині.",
     foods_search_ph: "Пошук: курка, гречка, яблуко, сир…",
     sort_name: "За назвою",
     sort_price: "Найдешевші",
@@ -841,7 +1023,7 @@ export const I18N = {
     saved_diets_title: "Збережені раціони",
     saved_empty: "Тут з'являться раціони, які ви збережете кнопкою «Зберегти».",
     install_pwa_title: "Встановити на телефон",
-    install_pwa_sub: "DietOpt — це веб-застосунок (PWA): його можна додати на головний екран і користуватися навіть без інтернету.",
+    install_pwa_sub: "Додай DietOpt на головний екран — застосунок працює офлайн.",
     install_btn: "Встановити застосунок",
     install_ios: "iPhone (Safari): кнопка «Поділитися» ➔ «На екран Додому».",
     install_android: "Android (Chrome): меню ⋮ ➔ «Додати на головний екран» або «Встановити».",
@@ -854,7 +1036,7 @@ export const I18N = {
     overrides_empty: "Ви ще не змінювали ціни і не виключали продукти.",
     reset_override: "Скинути",
     about_title: "Про проєкт",
-    about_text: "DietOpt — інформаційна система оптимізації раціону харчування студента на основі формули Міффліна — Сан Жеора та симплекс-методу.",
+    about_text: "Простий планувальник меню та покупок з окремими цінами для Німеччини й України.",
     reset_all_data: "Стерти всі мої дані",
     reset_all_confirm: "Стерти всі дані?",
     reset_all_sub: "Профіль, збережені раціони, список покупок, ваші ціни та ключ AI буде видалено з цього пристрою.",
@@ -866,7 +1048,6 @@ export const I18N = {
     toast_prices_saved: "Збережено!",
   }
 };
-
 export function t(key, ...args) {
   const dict = I18N[currentLang] || I18N.de;
   let str = dict[key] || I18N.en[key] || I18N.de[key] || key;

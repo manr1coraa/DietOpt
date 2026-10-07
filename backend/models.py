@@ -1,5 +1,4 @@
-# models.py — Моделі даних (Pydantic)
-# Кваліфікаційна робота: Литвин А.В., ХНУ ім. В.Н. Каразіна, 2026
+# Request and response models for the optional API.
 
 from pydantic import BaseModel, Field
 from typing import Optional, List

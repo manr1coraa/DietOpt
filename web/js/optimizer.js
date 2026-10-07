@@ -1,9 +1,6 @@
 /* ═══════════════════════════════════════════════════════════════
-   optimizer.js — ядро DietOpt, яке працює прямо в браузері.
-   Порт алгоритму з backend/optimizer.py (PuLP/CBC) на JavaScript
-   (власний двофазний симплекс-метод, simplex.js). Сервер не потрібен.
-
-   Кваліфікаційна робота: Литвин А.В., ХНУ ім. В.Н. Каразіна, 2026
+   optimizer.js — browser-side menu planning and nutrition logic.
+   The published static app needs no server.
    ═══════════════════════════════════════════════════════════════ */
 
 import { solveBounded } from './simplex.js';
@@ -219,6 +216,17 @@ export const STANDARD_TEMPLATES = [
   }),
 ];
 
+const GERMANY_TEMPLATE_NAMES = new Set([
+  '🇩🇪 Deutscher Fitness-Klassiker',
+  '🇩🇪 Deutsches Abendbrot & Alltag',
+  '🇩🇪 Spar-Plan Deutschland (Aldi/Lidl)',
+]);
+const UKRAINE_TEMPLATE_NAMES = new Set(['Гречано-курячий']);
+STANDARD_TEMPLATES.forEach(template => {
+  template.market = GERMANY_TEMPLATE_NAMES.has(template.name) ? 'de'
+    : UKRAINE_TEMPLATE_NAMES.has(template.name) ? 'ua' : 'both';
+});
+
 export const VEGAN_TEMPLATES = [
   T('Веганський класичний', {
     breakfast: [['вівсян', 1.5, 3.5], ['банан', 1.0, 2.0], ['волоський горіх', 0.2, 0.5]],
@@ -329,7 +337,9 @@ export function filterProducts(allProducts, profile, extra = {}) {
       return true;
     })
     .map(p => {
-      const basePr = isEur ? (p.pr_eur ?? Math.round((p.pr / 45) * 100) / 100) : p.pr;
+      const expectedCurrency = isEur ? 'EUR' : 'UAH';
+      const basePr = p.price_currency === expectedCurrency ? p.pr
+        : isEur ? (p.pr_eur ?? Math.round((p.pr / 45) * 100) / 100) : p.pr;
       const customPr = prices[p.id];
       return { ...p, pr: customPr != null ? customPr : basePr };
     });
@@ -407,10 +417,12 @@ function solveLP(selected, norms, budget, opt) {
   };
 }
 
-export function templatesFor(profile) {
-  if (profile.diet_type === 'vegan') return VEGAN_TEMPLATES;
-  if (profile.diet_type === 'vegetarian') return VEGETARIAN_TEMPLATES;
-  return STANDARD_TEMPLATES;
+export function templatesFor(profile = {}) {
+  const market = profile.market || (profile.currency === 'UAH' ? 'ua' : 'de');
+  const templates = profile.diet_type === 'vegan' ? VEGAN_TEMPLATES
+    : profile.diet_type === 'vegetarian' ? VEGETARIAN_TEMPLATES
+      : STANDARD_TEMPLATES;
+  return templates.filter(template => !template.market || template.market === 'both' || template.market === market);
 }
 
 const menuKey = r => r.menu.map(m => m.id).sort((a, b) => a - b).join(',');

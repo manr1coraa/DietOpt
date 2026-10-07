@@ -1,127 +1,59 @@
-# DietOpt — оптимальный рацион питания под бюджет
+# DietOpt
 
-Дипломный проект: Литвин А.В., ХНУ им. В.Н. Каразина, 2026, специальность 123.
+A simple meal and shopping planner for **Germany and Ukraine**. Choose a market, set a daily budget and get meal ideas with a practical shopping list. The interface is available in German, English, Russian and Ukrainian.
 
-DietOpt подбирает самое дешёвое меню на день и на неделю, которое покрывает норму калорий, белков, жиров и углеводов (формула Миффлина — Сан Жеора). Внутри — задача линейного программирования (симплекс-метод), база из 515 продуктов с ценами в гривнах и шаблоны блюд для завтрака, перекуса, обеда и ужина.
+**Live app:** https://manr1coraa.github.io/DietOpt/
 
-Главное: **сайт полностью работает в браузере, без сервера.** Весь расчёт выполняется на телефоне или компьютере пользователя, поэтому хостинг бесплатный, а приложение работает даже без интернета (PWA).
+## What it does
 
----
+- Builds a daily menu from a budget and basic preferences.
+- Lets you edit portions, add foods and save menu ideas.
+- Creates a shopping list that can be checked off or sent as a text copy.
+- Uses separate product prices and preferences for Germany and Ukraine; international foods and meals can be shared between both markets.
+- Includes a service worker for offline caching and can be installed as a web app.
 
-## Структура папки
+## Regional food data
 
-```
-DietOpt/
-├── web/                  ← ЭТО И ЕСТЬ САЙТ. Именно эту папку выкладываете на хостинг
-│   ├── index.html
-│   ├── css/  fonts/  icons/
-│   ├── js/
-│   │   ├── simplex.js    собственный симплекс-метод (двухфазный, правило Бленда)
-│   │   ├── optimizer.js  нормы КБЖУ, аллергены, шаблоны блюд, оптимизация, неделя
-│   │   ├── recipes.js    офлайн-рецепты + необязательные AI-рецепты (Gemini)
-│   │   └── app.js        интерфейс, маршрутизация, сохранение, списки покупок
-│   ├── data/products.json  база продуктов (выгружена из SQLite)
-│   ├── manifest.webmanifest, sw.js   установка на телефон и офлайн-режим
-├── backend/              необязательная Python-версия (FastAPI + PuLP + SQLite)
-├── tools/export_db.py    выгрузка базы SQLite → web/data/products.json
-├── .github/workflows/pages.yml   автопубликация на GitHub Pages
-└── netlify.toml          настройки для Netlify / Cloudflare Pages
-```
+The browser app uses static JSON data, not a live supermarket feed:
 
----
+- `web/data/catalog/products.json` — shared food catalogue, nutrition values, categories and translations.
+- `web/data/markets/de.json` — German-market prices in EUR per 100 g.
+- `web/data/markets/ua.json` — Ukrainian-market prices in UAH per 100 g.
 
-## Как выложить в интернет бесплатно
+Prices are reference estimates, not current offers from a particular store. In the app, you can enter your own local prices. Market-specific preferences and shopping lists are kept separately.
 
-Подойдёт любой из способов. Во всех случаях публикуется папка `web`.
+To update Ukrainian product data from the SQLite source, run `python tools/export_db.py`. This preserves manually added catalogue entries and does not overwrite the Germany price file. Edit `web/data/markets/de.json` separately to update German prices.
 
-### Вариант 1. Netlify Drop — самый простой (2 минуты, без кода)
-1. Откройте https://app.netlify.com/drop и зарегистрируйтесь (бесплатно).
-2. Перетащите в окно папку **`web`** целиком.
-3. Получите ссылку вида `https://имя.netlify.app`. В настройках сайта (Site configuration → Change site name) можно поменять имя.
+## Your data and privacy
 
-### Вариант 2. GitHub Pages — удобно обновлять
-1. Создайте репозиторий на GitHub и загрузите туда всю папку `DietOpt` (через сайт: Add file → Upload files, или `git push`).
-2. Settings → Pages → Build and deployment → Source: **GitHub Actions**.
-3. Через минуту сайт будет по адресу `https://ваш-логин.github.io/имя-репозитория/`. При каждом изменении файлов он обновляется сам (файл `.github/workflows/pages.yml`).
+The GitHub Pages app is static. Your profile, saved menus, shopping list and custom prices are stored in **local storage in the browser on your device**. Closing or refreshing the page does not delete them. Clearing the browser's site data, using private/incognito mode, or switching browsers/devices may remove or hide them.
 
-### Вариант 3. Cloudflare Pages или Vercel
-Подключите репозиторий с GitHub, команда сборки — пустая, папка вывода (Output directory) — `web`.
+Each friend using a different device has their own private data. The “Send list” action shares a text snapshot; it does **not** create a live shared list. Use **More → Your data → Download backup / Import backup** to move your saved data between devices. The optional Python backend in this repository is not connected to the public Pages app. For real-time sync between friends, a separately hosted API and persistent database would be needed.
 
-### Свой домен
-Купите домен (например, у Namecheap, Cloudflare или украинского регистратора), затем в настройках хостинга добавьте его (Netlify: Domain management, GitHub Pages: Settings → Pages → Custom domain) и пропишите у регистратора DNS-записи, которые покажет хостинг. HTTPS включается автоматически.
+No account is required, and the public Pages site does not receive the personal data you enter. If you choose the optional AI-recipe feature, the selected menu and profile are sent to Google for that request.
 
----
+## Run locally
 
-## Как пользоваться с телефона
-
-Откройте ссылку на сайт и установите его как приложение:
-- **iPhone (Safari):** «Поделиться» → «На экран Домой».
-- **Android (Chrome):** меню ⋮ → «Добавить на главный экран» / «Установить приложение».
-- **Компьютер (Chrome/Edge):** значок установки справа в адресной строке.
-
-После первого открытия приложение работает и без интернета. Профиль, сохранённые рационы, список покупок и свои цены хранятся только на устройстве (localStorage).
-
-Делиться можно кнопкой «Поделиться»: ссылка содержит профиль, и у получателя сразу откроется такой же расчёт.
-
----
-
-## Возможности
-
-- Расчёт норм КБЖУ по полу, возрасту, росту, весу, активности и цели (похудеть / держать вес / набрать).
-- Самое дешёвое меню на день в рамках бюджета + «обычное» меню на весь бюджет для сравнения.
-- Десятки вариантов меню, переключение стрелками; кнопка × у продукта — убрать его и пересчитать.
-- Типы питания: всеядное, вегетарианское, веганское; исключение аллергенов (молочное, глютен, орехи, яйца, рыба, морепродукты, соя, цитрусовые, грибы, свинина) и любых продуктов вручную.
-- Если бюджета не хватает — показывается минимальная стоимость и кнопка «установить этот бюджет».
-- План на неделю из 7 разных меню, итог на неделю и месяц.
-- Список покупок с отметками, группировкой по категориям, возможностью поделиться.
-- База продуктов: поиск, сортировка, фильтр по категориям; можно указать цену в своём магазине или отметить «не ем» — оптимизация учтёт это.
-- Рецепты: офлайн-генератор пошаговых инструкций; по желанию — AI-рецепты через Google Gemini (бесплатный ключ из https://aistudio.google.com/apikey вводится в разделе «Ещё» и хранится только на устройстве).
-- Диаграмма баланса КБЖУ, таблица сравнения, печать / сохранение в PDF.
-- Светлая и тёмная тема, адаптивный дизайн для телефона и компьютера.
-
----
-
-## Что было исправлено по сравнению с исходной версией
-
-- Ключевые слова шаблонов не совпадали с названиями в базе («огірок», «мінтай», «горіх грецьк», «томат» находил томатную пасту) — блюда собирались без нужных продуктов. Исправлено.
-- Опечатки с латинскими буквами («грибp», «помелo») ломали фильтр аллергенов. Исправлено.
-- Макароны исключались вместе с категорией «борошно». Исправлено (мука отсекается чёрным списком).
-- Модели Gemini 1.5/2.0 отключены Google, поэтому AI-рецепты не работали. Обновлено на актуальные модели 3.x.
-- Сухие крупы считались как готовые — порции получались нереальными. Добавлено ограничение порции.
-- Нижняя граница белка была слишком мягкой — теперь меню ближе к норме.
-- В интерфейсе были жёстко прописаны неверные цифры («334 продуктів», «±5%»). Убрано.
-- XSS-уязвимость: результаты поиска вставлялись через innerHTML без экранирования. Исправлено.
-- В репозиторий попали файл `.env` с настоящим API-ключом и Windows-папка `.venv`. Убрано, добавлен `.gitignore`.
-- Для работы требовался запущенный Python-сервер (localhost). Теперь сайт работает статически на любом хостинге.
-
-**Важно:** ключ Gemini из старого файла `.env` был в открытом виде — отзовите его в Google AI Studio (https://aistudio.google.com/apikey) и создайте новый.
-
----
-
-## Обновление цен и продуктов
-
-1. Отредактируйте базу `backend/food_tracker.db` (например, в DB Browser for SQLite).
-2. Выполните `python tools/export_db.py` — обновится `web/data/products.json`.
-3. В файле `web/sw.js` измените `VERSION` (например, `dietopt-v3.0.1`), чтобы у пользователей подтянулась новая версия.
-4. Загрузите обновлённую папку `web` на хостинг (на GitHub Pages — просто push).
-
----
-
-## Python-версия (необязательно, для защиты диплома)
-
-Исходная серверная часть сохранена и исправлена: FastAPI + PuLP + SQLite, документация API на `/docs`.
+The main app needs no build step or server-side database:
 
 ```bash
-cd backend
-python -m venv .venv
-# Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env        # и при желании вставьте GEMINI_API_KEY
-uvicorn main:app --reload
+python -m http.server 8000 --directory web
 ```
 
-Откройте http://127.0.0.1:8000 — сервер отдаёт тот же сайт из папки `web` и API (`/api/health`, `/api/calculate-norms`, `/api/optimize`, `/api/optimize-basic`, `/api/products` и др.).
+Open <http://localhost:8000>. To prepare for offline use, open it once while online; the service worker is set up to cache the app and both market databases.
 
-Docker: `docker build -f backend/Dockerfile -t dietopt .` и `docker run -p 8000:8000 dietopt`.
+## Publish
 
-Обе реализации (JavaScript-симплекс в браузере и PuLP на сервере) дают практически одинаковый результат: для базового профиля около 136 грн в день.
+GitHub Pages is configured to publish the `web/` directory through `.github/workflows/pages.yml` whenever `main` changes. The project itself is in this repository; the website is a separate deployable front end.
+
+## Repository layout
+
+```text
+web/                         Browser app and GitHub Pages site
+  data/catalog/              Shared international food catalogue
+  data/markets/              Separate Germany and Ukraine price data
+  js/                        UI, meal logic, regional data loader, translations
+backend/                     Optional local FastAPI / SQLite API
+ tools/export_db.py          Export product nutrition and Ukrainian prices
+.github/workflows/pages.yml  Publish the web app to GitHub Pages
+```

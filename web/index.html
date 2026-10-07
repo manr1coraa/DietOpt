@@ -3,14 +3,27 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>DietOpt — Ausgewogene Ernährung zum kleinen Preis</title>
-  <meta name="description" content="Kostenloser Ernährungsplaner: Berechnet Kalorien & Makronährstoffe (Mifflin-St Jeor) und stellt das günstigste Menü zusammen — mit Einkaufsliste und Supermarktpreisen in Deutschland.">
+  <title>DietOpt — Menü und Einkauf einfach planen</title>
+  <meta name="description" content="Einfacher Menü- und Einkaufsplaner für Deutschland und die Ukraine. Kostenlos, ohne Konto und offline nutzbar.">
   <meta name="theme-color" content="#2f6b3f" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#121512" media="(prefers-color-scheme: dark)">
-  <meta property="og:title" content="DietOpt — Ausgewogene Ernährung zum kleinen Preis">
-  <meta property="og:description" content="Kalorienbedarf, optimaler Menüplan, Mahlzeiten-Baukasten und Einkaufsliste. Kostenlos & ohne Registrierung.">
+  <meta property="og:title" content="DietOpt — Menü und Einkauf einfach planen">
+  <meta property="og:description" content="Plane ein Tagesmenü und stelle deine Einkaufsliste zusammen. Für Deutschland und die Ukraine.">
   <meta property="og:type" content="website">
-  <meta property="og:image" content="icons/og.png">
+  <meta property="og:site_name" content="DietOpt">
+  <meta property="og:url" content="https://manr1coraa.github.io/DietOpt/">
+  <meta property="og:locale" content="de_DE">
+  <meta property="og:image" content="https://manr1coraa.github.io/DietOpt/icons/og.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="DietOpt — einfacher Menü- und Einkaufsplaner">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="DietOpt — Menü und Einkauf einfach planen">
+  <meta name="twitter:description" content="Plane ein Tagesmenü und stelle deine Einkaufsliste zusammen. Für Deutschland und die Ukraine.">
+  <meta name="twitter:image" content="https://manr1coraa.github.io/DietOpt/icons/og.png">
+  <meta name="twitter:image:alt" content="DietOpt — einfacher Menü- und Einkaufsplaner">
+  <link rel="canonical" href="https://manr1coraa.github.io/DietOpt/">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -42,19 +55,17 @@
     </a>
 
     <nav class="topnav" aria-label="Navigation">
-      <a href="#/plan" data-nav="plan"><span data-i18n="nav_plan">Plan</span></a>
-      <a href="#/builder" data-nav="builder"><span data-i18n="nav_builder">Baukasten</span></a>
+      <a href="#/plan" data-nav="plan"><span data-i18n="nav_plan">Menü</span></a>
       <a href="#/week" data-nav="week"><span data-i18n="nav_week">Woche</span></a>
       <a href="#/list" data-nav="list"><span data-i18n="nav_list">Einkauf</span> <span class="pill" data-count-list hidden></span></a>
-      <a href="#/foods" data-nav="foods"><span data-i18n="nav_foods">Lebensmittel</span></a>
       <a href="#/more" data-nav="more"><span data-i18n="nav_more">Mehr</span></a>
     </nav>
 
     <div class="topbar__actions">
-      <!-- Currency & Region selector -->
-      <select id="currency-select" class="top-select" aria-label="Währung / Currency">
-        <option value="EUR">🇩🇪 € EUR</option>
-        <option value="UAH">🇺🇦 ₴ UAH</option>
+      <label class="sr-only" for="market-select" data-i18n="region_label">Region</label>
+      <select id="market-select" class="top-select" aria-label="Region">
+        <option value="de" data-i18n="market_de">🇩🇪 Deutschland · €</option>
+        <option value="ua" data-i18n="market_ua">🇺🇦 Ukraine · ₴</option>
       </select>
 
       <!-- Language selector -->
@@ -84,13 +95,6 @@
           <p class="muted small" data-i18n="profile_sub">Alle Daten bleiben lokal auf deinem Gerät.</p>
         </div>
         <form id="profile-form" class="form" novalidate>
-          <fieldset class="field">
-            <legend class="label" data-i18n="gender">Geschlecht</legend>
-            <div class="seg" role="radiogroup">
-              <label><input type="radio" name="gender" value="male" checked><span data-i18n="gender_male">Mann</span></label>
-              <label><input type="radio" name="gender" value="female"><span data-i18n="gender_female">Frau</span></label>
-            </div>
-          </fieldset>
           <div class="grid-3">
             <label class="field"><span class="label" data-i18n="age">Alter</span>
               <span class="input-wrap"><input name="age" type="number" inputmode="numeric" min="14" max="80" value="25" required><i data-i18n="age_unit">J.</i></span></label>
@@ -103,36 +107,48 @@
             <input name="budget" id="budget-input" type="range" min="3" max="30" step="0.5" value="8" class="range">
             <span class="range-scale small muted" id="range-scale"><span>3 €</span><span>8 €</span><span>15 €</span><span>30 €</span></span>
           </label>
-          <label class="field"><span class="label" data-i18n="activity">Aktivitätslevel</span>
-            <select name="activity_level" id="activity-select">
-              <option value="sedentary">Sitzend (Bürojob, wenig Bewegung)</option>
-              <option value="light" selected>Leicht aktiv (1–3 Workouts / Woche)</option>
-              <option value="moderate">Mäßig aktiv (3–5 Workouts)</option>
-              <option value="active">Sehr aktiv (6–7 Workouts)</option>
-              <option value="very_active">Extrem aktiv (Leistungssport / Bau)</option>
-            </select>
-          </label>
-          <fieldset class="field">
-            <legend class="label" data-i18n="goal">Ziel</legend>
-            <div class="seg seg--3" role="radiogroup">
-              <label><input type="radio" name="goal" value="loss"><span data-i18n="goal_loss">Abnehmen</span></label>
-              <label><input type="radio" name="goal" value="maintain" checked><span data-i18n="goal_maintain">Halten</span></label>
-              <label><input type="radio" name="goal" value="gain"><span data-i18n="goal_gain">Zunehmen</span></label>
+          <details class="profile-advanced">
+            <summary data-i18n="profile_advanced">Weitere Einstellungen</summary>
+            <div class="profile-advanced__body">
+              <fieldset class="field">
+                <legend class="label" data-i18n="gender">Geschlecht</legend>
+                <div class="seg" role="radiogroup">
+                  <label><input type="radio" name="gender" value="male" checked><span data-i18n="gender_male">Mann</span></label>
+                  <label><input type="radio" name="gender" value="female"><span data-i18n="gender_female">Frau</span></label>
+                </div>
+              </fieldset>
+              <label class="field"><span class="label" data-i18n="activity">Aktivitätslevel</span>
+                <select name="activity_level" id="activity-select">
+                  <option value="sedentary" data-i18n="act_sedentary">Sitzend</option>
+                  <option value="light" selected data-i18n="act_light">Leicht aktiv</option>
+                  <option value="moderate" data-i18n="act_moderate">Mäßig aktiv</option>
+                  <option value="active" data-i18n="act_active">Sehr aktiv</option>
+                  <option value="very_active" data-i18n="act_very_active">Extrem aktiv</option>
+                </select>
+              </label>
+              <fieldset class="field">
+                <legend class="label" data-i18n="goal">Ziel</legend>
+                <div class="seg seg--3" role="radiogroup">
+                  <label><input type="radio" name="goal" value="loss"><span data-i18n="goal_loss">Abnehmen</span></label>
+                  <label><input type="radio" name="goal" value="maintain" checked><span data-i18n="goal_maintain">Halten</span></label>
+                  <label><input type="radio" name="goal" value="gain"><span data-i18n="goal_gain">Zunehmen</span></label>
+                </div>
+              </fieldset>
+              <fieldset class="field">
+                <legend class="label" data-i18n="diet_type">Ernährungsweise</legend>
+                <div class="seg seg--3" role="radiogroup">
+                  <label><input type="radio" name="diet_type" value="standard" checked><span data-i18n="diet_standard">Mischkost</span></label>
+                  <label><input type="radio" name="diet_type" value="vegetarian"><span data-i18n="diet_vegetarian">Vegetarisch</span></label>
+                  <label><input type="radio" name="diet_type" value="vegan"><span data-i18n="diet_vegan">Vegan</span></label>
+                </div>
+              </fieldset>
+              <fieldset class="field">
+                <legend class="label" data-i18n="allergies">Ausschluss / Allergien</legend>
+                <div class="chips" id="allergy-chips"></div>
+                <input name="allergies_extra" id="allergies_extra" type="text" placeholder="Weitere Allergien oder Lebensmittel" autocomplete="off">
+              </fieldset>
             </div>
-          </fieldset>
-          <fieldset class="field">
-            <legend class="label" data-i18n="diet_type">Ernährungsweise</legend>
-            <div class="seg seg--3" role="radiogroup">
-              <label><input type="radio" name="diet_type" value="standard" checked><span data-i18n="diet_standard">Mischkost</span></label>
-              <label><input type="radio" name="diet_type" value="vegetarian"><span data-i18n="diet_vegetarian">Vegetar.</span></label>
-              <label><input type="radio" name="diet_type" value="vegan"><span data-i18n="diet_vegan">Vegan</span></label>
-            </div>
-          </fieldset>
-          <fieldset class="field">
-            <legend class="label" data-i18n="allergies">Ausschluss / Allergien</legend>
-            <div class="chips" id="allergy-chips"></div>
-            <input name="allergies_extra" id="allergies_extra" type="text" placeholder="Weitere mit Komma: Schweinefleisch, Tomaten…" autocomplete="off">
-          </fieldset>
+          </details>
           <button class="btn btn--primary btn--block btn--lg" type="submit" id="run-btn">
             <span data-i18n="calc_btn">Optimalen Plan berechnen</span>
           </button>
@@ -142,14 +158,13 @@
 
       <div class="results" id="results" aria-live="polite">
         <div class="hero-empty" id="plan-empty">
-          <p class="eyebrow" data-i18n="hero_eyebrow">Kostenlos · Ohne Registrierung · Funktioniert offline</p>
-          <h2 class="h-hero" data-i18n="hero_title">Volle Nährwerte.<br>Minimaler Preis.</h2>
-          <p class="lead" data-i18n="hero_lead">DietOpt ermittelt deinen Kalorien- und Makronährstoffbedarf und berechnet per linearer Programmierung das günstigste vollwertige Tagesmenü aus 500+ Supermarkt-Lebensmitteln.</p>
-          <ol class="how">
-            <li><b>1</b><span data-i18n="hero_step1">Profil ausfüllen — 30 Sekunden</span></li>
-            <li><b>2</b><span data-i18n="hero_step2">Ausgewogenes 4-Mahlzeiten-Menü erhalten</span></li>
-            <li><b>3</b><span data-i18n="hero_step3">Zutaten direkt in die Einkaufsliste übernehmen</span></li>
-          </ol>
+          <p class="eyebrow" data-i18n="hero_eyebrow">Einfach planen. Gut einkaufen.</p>
+          <h2 class="h-hero" data-i18n="hero_title">Was essen wir heute?</h2>
+          <p class="lead" data-i18n="hero_lead">Wähle dein Budget. DietOpt schlägt ein Tagesmenü vor und erstellt deine Einkaufsliste.</p>
+          <div class="hero-actions">
+            <a class="btn" href="#/builder" data-i18n="hero_action_manual">Menü selbst zusammenstellen</a>
+            <a class="btn" href="#/week" data-i18n="hero_action_week">Woche planen</a>
+          </div>
         </div>
         <div id="plan-output" hidden></div>
       </div>
@@ -178,17 +193,10 @@
       </div>
     </div>
 
-    <!-- Presets bar -->
+    <!-- Region-specific presets plus international meals -->
     <div class="builder-presets-bar">
-      <span class="small muted" data-i18n="builder_presets">Vorlagen / Раціони:</span>
-      <div class="chips" id="builder-presets">
-        <button type="button" class="chip chip--preset" data-preset="fitness">🇩🇪 Fitness-Klassiker</button>
-        <button type="button" class="chip chip--preset" data-preset="abendbrot">🇩🇪 Abendbrot & Alltag</button>
-        <button type="button" class="chip chip--preset" data-preset="spar">🇩🇪 Aldi/Lidl Spar (&lt; 5 €)</button>
-        <button type="button" class="chip chip--preset" data-preset="student_ua">🇺🇦 Студент-Економ (~120 ₴)</button>
-        <button type="button" class="chip chip--preset" data-preset="classic_ua">🇺🇦 Домашній (~185 ₴)</button>
-        <button type="button" class="chip chip--preset" data-preset="power_ua">🇺🇦 Силовий (~220 ₴)</button>
-      </div>
+      <span class="small muted" data-i18n="builder_presets">Vorlagen:</span>
+      <div class="chips" id="builder-presets"></div>
     </div>
 
     <!-- Live Macro Dashboard -->
@@ -241,6 +249,7 @@
         <p class="muted" data-i18n="foods_sub">Nährwerte und Supermarktpreise pro 100 g. Klicke auf ein Produkt zum Anpassen oder Ausschließen.</p>
       </div>
     </div>
+    <p class="small muted market-price-note" data-i18n="market_price_note">Цены — ориентировочные; при необходимости измени цену для своего магазина.</p>
     <div class="foods-tools">
       <label class="search">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
@@ -266,65 +275,55 @@
       </div>
     </div>
     <div class="more-grid">
-      <div class="panel">
-        <h2 class="h-section" data-i18n="saved_diets_title">Gespeicherte Pläne</h2>
+      <section class="panel">
+        <h2 class="h-section" data-i18n="storage_title">Deine Daten</h2>
+        <p class="small storage-status" id="storage-status"></p>
+        <p class="small muted" data-i18n="storage_local">Profil, Einkaufsliste, gespeicherte Menüs und eigene Preise bleiben in diesem Browser.</p>
+        <p class="small muted" data-i18n="storage_caveat">Beim Schließen der Seite bleiben sie erhalten. Beim Löschen der Browserdaten können sie verloren gehen.</p>
+        <p class="small muted" data-i18n="storage_shared">Teilen verschickt eine Kopie als Text. Eine Live-Synchronisierung gibt es derzeit nicht.</p>
+        <p class="small muted" data-i18n="storage_ai">KI-Rezepte sind optional; bei Nutzung werden Menü und Profil an Google gesendet.</p>
+        <p class="small market-storage-note" id="storage-market-detail"></p>
+        <div class="row-gap">
+          <button class="btn btn--primary" id="backup-export" type="button" data-i18n="backup_export">Backup herunterladen</button>
+          <label class="btn" for="backup-file" data-i18n="backup_import">Backup importieren</label>
+          <input class="sr-only" id="backup-file" type="file" accept="application/json,.json">
+        </div>
+        <button class="btn btn--ghost btn--danger" id="reset-all" type="button" data-i18n="reset_all_data">Alle lokalen Daten zurücksetzen</button>
+      </section>
+
+      <section class="panel">
+        <h2 class="h-section" data-i18n="tools_title">Weitere Funktionen</h2>
+        <nav class="tool-links" aria-label="Weitere Funktionen">
+          <a class="tool-link" href="#/builder" data-nav="builder"><span>＋</span><span data-i18n="tool_builder">Menü selbst zusammenstellen</span></a>
+          <a class="tool-link" href="#/week" data-nav="week"><span>▦</span><span data-i18n="tool_week">Wochenplan</span></a>
+          <a class="tool-link" href="#/foods" data-nav="foods"><span>⌕</span><span data-i18n="tool_foods">Lebensmittel und Preise</span></a>
+        </nav>
+        <button class="btn" id="install-btn" type="button" hidden data-i18n="install_btn">App installieren</button>
+        <p class="small muted" data-i18n="install_pwa_sub">Du kannst DietOpt zum Startbildschirm hinzufügen und offline verwenden.</p>
+      </section>
+
+      <section class="panel">
+        <h2 class="h-section" data-i18n="saved_diets_title">Gespeicherte Menüs</h2>
         <div id="saved-output"></div>
-      </div>
-      <div class="panel">
-        <h2 class="h-section" data-i18n="install_pwa_title">Als App auf dem Handy installieren</h2>
-        <p class="muted small" data-i18n="install_pwa_sub">DietOpt ist eine Offline-Web-App (PWA): Du kannst sie auf deinen Home-Bildschirm legen und ohne Browser nutzen.</p>
-        <button class="btn btn--primary" id="install-btn" type="button" hidden data-i18n="install_btn">App installieren</button>
-        <ul class="steps-list">
-          <li data-i18n="install_ios"><b>iPhone (Safari):</b> Teilen-Symbol ➔ «Zum Home-Bildschirm».</li>
-          <li data-i18n="install_android"><b>Android (Chrome):</b> Menü ⋮ ➔ «Zum Startbildschirm hinzufügen» oder «App installieren».</li>
-          <li data-i18n="install_pc"><b>Computer (Chrome / Edge):</b> Installationssymbol rechts in der Adressleiste.</li>
-        </ul>
-      </div>
-      <div class="panel">
-        <h2 class="h-section" data-i18n="ai_settings_title">KI-Rezepte (Optional)</h2>
-        <p class="muted small" data-i18n="ai_settings_sub">DietOpt berechnet einfache Rezepte komplett offline. Für kreative KI-Rezepte kannst du deinen kostenlosen Schlüssel aus <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a> hinterlegen.</p>
-        <form id="ai-form" class="form">
-          <label class="field"><span class="label">Gemini API Key</span>
-            <input name="key" type="password" autocomplete="off" placeholder="AIza…" spellcheck="false"></label>
-          <label class="field"><span class="label">Modell</span>
-            <select name="model">
-              <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (schnell & sparsam)</option>
-              <option value="gemini-2.5-flash">gemini-2.5-flash (sehr intelligent)</option>
-              <option value="gemini-1.5-flash">gemini-1.5-flash</option>
-            </select></label>
-          <div class="row-gap">
-            <button class="btn btn--primary" type="submit" data-i18n="ai_save_btn">Speichern</button>
-            <button class="btn btn--ghost" type="button" id="ai-clear" data-i18n="ai_clear_btn">Schlüssel löschen</button>
-          </div>
-        </form>
-      </div>
-      <div class="panel">
-        <h2 class="h-section" data-i18n="overrides_title">Angepasste Preise & Ausschlüsse</h2>
+      </section>
+      <section class="panel">
+        <h2 class="h-section" data-i18n="overrides_title">Eigene Preise und ausgeschlossene Produkte</h2>
         <div id="overrides-output"></div>
-      </div>
-      <div class="panel panel--about">
+      </section>
+      <section class="panel panel--about">
         <h2 class="h-section" data-i18n="about_title">Über DietOpt</h2>
-        <p class="small" data-i18n="about_text">DietOpt ist ein intelligentes System zur Optimierung des Ernährungsplans auf wissenschaftlicher Basis (Mifflin-St Jeor) und mathematischer Optimierung (Simplex-Algorithmus).</p>
-        <dl class="facts small">
-          <dt>Formel</dt><dd>Mifflin-St Jeor (1990), PAL-Aktivitätsfaktoren, WHO BMI</dd>
-          <dt>Algorithmus</dt><dd>Zweiphasiger Simplex-Algorithmus (Lineare Optimierung) direkt im Browser</dd>
-          <dt>Datenbank</dt><dd id="about-db">—</dd>
-        </dl>
-        <button class="btn btn--ghost btn--danger" id="reset-all" type="button" style="margin-top:1rem" data-i18n="reset_all_data">Alle lokalen Daten zurücksetzen</button>
-      </div>
+        <p class="small" data-i18n="about_text">Ein einfacher Menü- und Einkaufsplaner für Deutschland und die Ukraine.</p>
+        <p class="small muted" id="about-db">—</p>
+      </section>
     </div>
   </section>
 </main>
 
-<!-- Mobile Tabbar (6 Tabs) -->
+<!-- Mobile navigation: the four main tasks only -->
 <nav class="tabbar" aria-label="Mobile Navigation">
   <a href="#/plan" data-nav="plan">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18a9 9 0 0 1-18 0Z"/><path d="M8 8.5 11 6l3 2 4-4"/></svg>
-    <span data-i18n="nav_plan">Plan</span>
-  </a>
-  <a href="#/builder" data-nav="builder">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-    <span data-i18n="nav_builder">Baukasten</span>
+    <span data-i18n="nav_plan">Menü</span>
   </a>
   <a href="#/week" data-nav="week">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>
@@ -334,10 +333,6 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h14l-1.5 11.5a2 2 0 0 1-2 1.5h-7a2 2 0 0 1-2-1.5Z"/><path d="M9 7V5a3 3 0 0 1 6 0v2"/></svg>
     <span data-i18n="nav_list">Einkauf</span>
     <i class="dot" data-count-list hidden></i>
-  </a>
-  <a href="#/foods" data-nav="foods">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-    <span data-i18n="nav_foods">Lebensmittel</span>
   </a>
   <a href="#/more" data-nav="more">
     <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>

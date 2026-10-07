@@ -1,6 +1,5 @@
-# database.py — Модуль роботи з базою даних SQLite
-# Працює з новою структурою БД: categories + products + food_log
-# Кваліфікаційна робота: Литвин А.В., ХНУ ім. В.Н. Каразіна, 2026
+# SQLite access for the optional local API.
+# Tables: categories, products, food_log and optimization_logs.
 
 import sqlite3
 import os
