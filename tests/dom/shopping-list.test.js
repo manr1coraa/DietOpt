@@ -107,7 +107,7 @@ function storedList(window) {
 }
 
 let dom;
-test('shopping list boots and renders seeded items in the interface language', async () => {
+test('shopping list boots and renders seeded items under market names', async () => {
   dom = await bootApp({
     storage: {
       'dietopt.lang': 'de',
@@ -119,7 +119,11 @@ test('shopping list boots and renders seeded items in the interface language', a
   const rows = [...dom.window.document.querySelectorAll('#list-output .shop-item')];
   assert.equal(rows.length, 2);
   const names = rows.map(r => r.querySelector('.shop-item__name').textContent);
-  assert.deepEqual(names, ['Haferflocken', 'Hühnerei']);
+  // Legacy rows (stored without market names) are healed from the DE market:
+  // the real Kölln offer for oats, the generic name for eggs.
+  assert.deepEqual(names, ['Haferflocken, Blütenzarte Köllnflocken', 'Hühnereier, Größe M']);
+  const healed = storedList(dom.window).items.find(i => i.id === 57);
+  assert.equal(healed.dname, 'Haferflocken, Blütenzarte Köllnflocken');
   assert.equal(rows[0].classList.contains('done'), false);
   assert.equal(rows[1].classList.contains('done'), true);
   assert.equal(rows[1].querySelector('.shop-check').checked, true);
