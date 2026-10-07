@@ -579,6 +579,7 @@ function renderPlan() {
         <span class="kpi__sub">${t('kpi_protein_sub', fmtInt(n.protein_min), fmtInt(n.protein_max))}</span>
       </div>
     </div>
+    <p class="xs muted" style="margin:-.25rem 0 1rem">${t('disclaimer_estimates')}</p>
 
     <div class="card">
       <div class="card__head">
@@ -631,7 +632,7 @@ function renderPlan() {
               <div class="norm"><b>${fmtInt(n.bmr)}</b><span>${t('norm_bmr_sub')}</span></div>
               <div class="norm"><b>${fmtInt(n.tdee)}</b><span>${t('norm_tdee_sub')}</span></div>
               <div class="norm"><b>${fmtInt(n.target_calories)}</b><span>${t('norm_target_sub')}</span></div>
-              <div class="norm"><b>${n.bmi}</b><span>${t('norm_bmi_sub', esc(n.bmi_status))}</span></div>
+              <div class="norm"><b>${n.bmi}</b><span>${t('norm_bmi_sub', t('bmi_' + n.bmi_class))}</span></div>
               <div class="norm"><b>${fmtInt(n.fat_min)}–${fmtInt(n.fat_max)} g</b><span>${t('kpi_fat')}</span></div>
               <div class="norm"><b>${fmtInt(n.carbs_min)}–${fmtInt(n.carbs_max)} g</b><span>${t('kpi_carbs')}</span></div>
               <div class="norm"><b>${(n.water_ml / 1000).toFixed(1)} L</b><span>${t('norm_water_sub')}</span></div>

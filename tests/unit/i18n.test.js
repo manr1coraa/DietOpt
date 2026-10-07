@@ -83,7 +83,8 @@ test('t() interpolates and never returns undefined', () => {
     for (const key of ['nav_plan', 'market_de', 'market_ua', 'list_title', 'recipes_section',
       'recipes_offline_note', 'recipe_offline_badge', 'ai_consent_title', 'ai_consent_what',
       'ai_consent_where', 'ai_consent_key', 'ai_err_badkey', 'ai_err_quota', 'ai_err_network',
-      'ai_err_unknown', 'src_price_estimate', 'src_nutrition_unverified']) {
+      'ai_err_unknown', 'src_price_estimate', 'src_nutrition_unverified',
+      'disclaimer_estimates', 'bmi_underweight', 'bmi_normal', 'bmi_overweight', 'bmi_obese']) {
       const value = t(key);
       assert.equal(typeof value, 'string', `${lang}:${key}`);
       assert.ok(value.length > 0, `${lang}:${key}`);

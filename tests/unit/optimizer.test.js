@@ -18,6 +18,10 @@ test('calculateNorms follows Mifflin-St Jeor x PAL (male example)', () => {
   assert.ok(Math.abs(n.tdee - 1742.5 * PAL.light) < 0.2);
   assert.equal(n.target_calories, n.tdee); // maintain => x1.0
   assert.equal(n.bmi, 23.7);
+  assert.equal(n.bmi_class, 'normal');
+  assert.equal(calculateNorms({ ...PROFILE, weight: 50 }).bmi_class, 'underweight');
+  assert.equal(calculateNorms({ ...PROFILE, weight: 90 }).bmi_class, 'overweight');
+  assert.equal(calculateNorms({ ...PROFILE, weight: 110 }).bmi_class, 'obese');
   assert.equal(n.water_ml, 75 * 35);
   assert.ok(n.protein_min < n.protein_max);
   assert.ok(n.fat_min < n.fat_max);

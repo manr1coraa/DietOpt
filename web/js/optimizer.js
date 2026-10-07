@@ -296,14 +296,14 @@ export function calculateNorms(p) {
   else if (p.goal === 'gain') { pp = [0.25, 0.35]; fp = [0.25, 0.30]; cp = [0.40, 0.50]; }
   else { pp = [0.25, 0.35]; fp = [0.25, 0.35]; cp = [0.35, 0.45]; }
   const bmi = r1(w / ((h / 100) ** 2));
-  const bmi_status = bmi < 18.5 ? 'Дефіцит маси тіла' : bmi < 25 ? 'Нормальна маса тіла'
-    : bmi < 30 ? 'Надмірна маса тіла' : 'Ожиріння';
+  const bmi_class = bmi < 18.5 ? 'underweight' : bmi < 25 ? 'normal'
+    : bmi < 30 ? 'overweight' : 'obese';
   return {
     bmr: r1(bmr), tdee: r1(tdee), target_calories: r1(target),
     protein_min: r1(target * pp[0] / 4), protein_max: r1(target * pp[1] / 4),
     fat_min: r1(target * fp[0] / 9), fat_max: r1(target * fp[1] / 9),
     carbs_min: r1(target * cp[0] / 4), carbs_max: r1(target * cp[1] / 4),
-    water_ml: Math.round(w * 35), bmi, bmi_status,
+    water_ml: Math.round(w * 35), bmi, bmi_class,
   };
 }
 
