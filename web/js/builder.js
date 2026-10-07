@@ -24,7 +24,7 @@ export const GERMAN_PRESETS = {
         { id: 96, grams: 10 },   // Olivenöl
       ],
       dinner: [
-        { id: 138, grams: 250 }, // Magerquark
+        { id: 610, grams: 250 }, // Magerquark (DE)
         { id: 483, grams: 60 },  // Vollkornbrot
         { id: 160, grams: 60 },  // Hühnerei (1 Stk)
         { id: 327, grams: 100 }, // Gurke frisch
@@ -78,7 +78,7 @@ export const GERMAN_PRESETS = {
         { id: 108, grams: 10 },  // Rapsöl
       ],
       dinner: [
-        { id: 138, grams: 250 }, // Magerquark
+        { id: 610, grams: 250 }, // Magerquark (DE)
         { id: 160, grams: 120 }, // Hühnerei (2 Stk)
         { id: 480, grams: 75 },  // Roggenbrot
       ]
@@ -102,7 +102,7 @@ export const UKRAINIAN_PRESETS = {
         { id: 53, grams: 250 },  // Гречана каша
         { id: 253, grams: 150 }, // Куряча печінка
         { id: 95, grams: 10 },   // Олія соняшникова
-        { id: 324, grams: 100 }, // Морква
+        { id: 326, grams: 100 }, // Морква (was 324 = leek, wrong id)
       ],
       dinner: [
         { id: 138, grams: 200 }, // Сир кисломолочний нежирний
@@ -274,7 +274,10 @@ export function convertBuilderToPlanMenu(builderState, productsMap, currency = '
       const nut = calcItemNutrition(prod, it.grams, currency, priceOverrides);
       menu.push({
         id: prod.id,
-        name: prod.n,
+        name: prod.dname || prod.n,
+        dname: prod.dname || prod.n,
+        n: prod.n,
+        market: prod.market,
         n_de: prod.n_de,
         n_en: prod.n_en,
         n_ru: prod.n_ru,

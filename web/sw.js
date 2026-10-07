@@ -1,10 +1,10 @@
 /* DietOpt offline shell. Bump VERSION whenever static app files or data change. */
-const VERSION = 'dietopt-v5.0.0';
+const VERSION = 'dietopt-v5.1.0';
 const ASSETS = [
   './', 'index.html', 'manifest.webmanifest',
   'css/fonts.css', 'css/app.css',
   'js/app.js', 'js/optimizer.js', 'js/simplex.js', 'js/recipes.js',
-  'js/i18n.js', 'js/builder.js', 'js/market-data.js',
+  'js/i18n.js', 'js/builder.js', 'js/market-data.js', 'js/shopping.js',
   'data/catalog/products.json',
   'data/markets/de.json', 'data/markets/ua.json',
   'fonts/Onest-cyrillic.woff2', 'fonts/Onest-latin.woff2',

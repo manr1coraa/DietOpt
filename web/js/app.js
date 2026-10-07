@@ -20,12 +20,21 @@ import {
   getPresetsForMarket, ALL_PRESETS,
 } from './builder.js';
 import { loadMarketData } from './market-data.js';
+import { mergeListItems } from './shopping.js';
 
 /* ─── DOM Helpers ───────────────────────────────────────────── */
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const lc = s => String(s || '').toLowerCase();
+/* Market display name: the active market owns product names, the interface
+   language owns labels. Concept translations serve only as a secondary
+   subtitle and as search aliases. */
+const mname = prod => prod?.dname || getFoodName(prod, S.lang);
+const conceptSub = prod => {
+  const c = getFoodName(prod, S.lang);
+  return c && c !== prod?.dname ? `<span class="food__concept">${esc(c)}</span>` : '';
+};
 const productBasePrice = (product, currency = S?.currency ?? currentCurrency) => {
   if (product?.price_currency === currency || product?.price_currency == null && currency !== 'EUR') return Number(product?.pr) || 0;
   return currency === 'EUR' ? (product?.pr_eur ?? (Number(product?.pr || 0) / 45)) : (Number(product?.pr) || 0);
@@ -34,8 +43,8 @@ const nextFrame = () => new Promise(r => requestAnimationFrame(() => setTimeout(
 
 const mem = {};
 const INITIAL_MARKET = currentMarket;
-const GLOBAL_KEYS = new Set(['lang', 'theme', 'market', 'currency']);
-const LEGACY_DATA_KEYS = new Set(['profile', 'banned', 'prices', 'list', 'saved', 'ai', 'builder']);
+const GLOBAL_KEYS = new Set(['lang', 'theme', 'market', 'currency', 'ai', 'ai-consent']);
+const LEGACY_DATA_KEYS = new Set(['profile', 'banned', 'prices', 'list', 'saved', 'builder']);
 const store = {
   key(k, market = currentMarket) {
     return GLOBAL_KEYS.has(k) ? `dietopt.${k}` : `dietopt.${market}.${k}`;
@@ -203,6 +212,39 @@ function installMarketData(data) {
   S.data.products.forEach(product => { S.productsMap.set(product.id, product); });
 }
 
+/* One-time: the AI key used to be stored per market; keep one per device. */
+try {
+  if (localStorage.getItem('dietopt.ai') == null) {
+    for (const m of ['de', 'ua']) {
+      const legacy = localStorage.getItem(`dietopt.${m}.ai`);
+      if (legacy) {
+        localStorage.setItem('dietopt.ai', legacy);
+        localStorage.removeItem(`dietopt.${m}.ai`);
+        break;
+      }
+    }
+  }
+} catch { /* storage unavailable */ }
+
+/* Backfill market display names into shopping rows stored before they
+   existed (their `name` was always Ukrainian). Rows whose product left the
+   market are kept untouched. */
+function healListNames() {
+  let healed = false;
+  for (const item of S.list.items) {
+    if (item.dname) continue;
+    const prod = S.productsMap.get(item.id);
+    if (!prod) continue;
+    item.dname = prod.dname;
+    item.name = prod.dname;
+    for (const key of ['n', 'n_de', 'n_en', 'n_ru']) {
+      if (prod[key] && !item[key]) item[key] = prod[key];
+    }
+    healed = true;
+  }
+  if (healed) store.set('list', S.list);
+}
+
 let marketLoadSequence = 0;
 async function changeMarket(market) {
   if (!['de', 'ua'].includes(market) || market === S.market) return;
@@ -231,6 +273,7 @@ async function changeMarket(market) {
     S.saved = store.get('saved', []);
     S.ai = store.get('ai', { key: '', model: 'gemini-2.5-flash-lite' });
     S.builder = getInitialBuilderState(market);
+    healListNames(); // after the new market's list was loaded, not before
     F.q = ''; F.cat = ''; F.limit = 60;
     $('#food-search').value = '';
     $('#food-cats').replaceChildren();
@@ -536,6 +579,7 @@ function renderPlan() {
         <span class="kpi__sub">${t('kpi_protein_sub', fmtInt(n.protein_min), fmtInt(n.protein_max))}</span>
       </div>
     </div>
+    <p class="xs muted" style="margin:-.25rem 0 1rem">${t('disclaimer_estimates')}</p>
 
     <div class="card">
       <div class="card__head">
@@ -557,6 +601,19 @@ function renderPlan() {
       <button class="btn" data-act="print">${ICON.print} ${t('btn_print')}</button>
     </div>
 
+    <section class="card" id="recipes-card">
+      <div class="card__head">
+        <div>
+          <h3 class="h-section">${t('recipes_section')}</h3>
+          <p class="xs muted" style="margin:.25rem 0 0">${t(S.aiText ? 'recipes_ai_note' : 'recipes_offline_note')}</p>
+        </div>
+        <button class="btn btn--sm no-print" data-act="ai">${ICON.spark} ${t('recipes_ai_btn')}</button>
+      </div>
+      <div id="ai-out">
+        ${S.aiText ? `<div class="ai-box">${miniMarkdown(S.aiText.text)}<p class="xs muted">${t('recipes_ai_badge', esc(S.aiText.model))}</p></div>` : `<div class="dishes">${MEAL_ORDER.filter(m => dishes[m]).map(m => dishHTML(m, dishes[m])).join('')}</div>`}
+      </div>
+    </section>
+
     <details class="details-card">
       <summary>${t('more_nutrition')}</summary>
       <div class="details-card__content">
@@ -567,15 +624,6 @@ function renderPlan() {
           </div>
           ${macrosHTML(r, n)}
         </section>
-        <section class="card">
-          <div class="card__head">
-            <h3 class="h-section">${t('recipes_section')}</h3>
-            <button class="btn btn--sm no-print" data-act="ai">${ICON.spark} ${t('recipes_ai_btn')}</button>
-          </div>
-          <div id="ai-out">
-            ${S.aiText ? `<div class="ai-box">${miniMarkdown(S.aiText.text)}<p class="xs muted">Model: ${esc(S.aiText.model)}</p></div>` : `<div class="dishes">${MEAL_ORDER.filter(m => dishes[m]).map(m => dishHTML(m, dishes[m])).join('')}</div>`}
-          </div>
-        </section>
         ${S.basic ? compareHTML(opt, S.basic) : ''}
         <section class="card">
           <details class="more" style="border:0;padding:0">
@@ -584,7 +632,7 @@ function renderPlan() {
               <div class="norm"><b>${fmtInt(n.bmr)}</b><span>${t('norm_bmr_sub')}</span></div>
               <div class="norm"><b>${fmtInt(n.tdee)}</b><span>${t('norm_tdee_sub')}</span></div>
               <div class="norm"><b>${fmtInt(n.target_calories)}</b><span>${t('norm_target_sub')}</span></div>
-              <div class="norm"><b>${n.bmi}</b><span>${t('norm_bmi_sub', esc(n.bmi_status))}</span></div>
+              <div class="norm"><b>${n.bmi}</b><span>${t('norm_bmi_sub', t('bmi_' + n.bmi_class))}</span></div>
               <div class="norm"><b>${fmtInt(n.fat_min)}–${fmtInt(n.fat_max)} g</b><span>${t('kpi_fat')}</span></div>
               <div class="norm"><b>${fmtInt(n.carbs_min)}–${fmtInt(n.carbs_max)} g</b><span>${t('kpi_carbs')}</span></div>
               <div class="norm"><b>${(n.water_ml / 1000).toFixed(1)} L</b><span>${t('norm_water_sub')}</span></div>
@@ -628,7 +676,7 @@ function mealHTML(meal, items, dish) {
 function dishHTML(meal, d) {
   const mealName = (MEAL_NAMES_I18N[S.lang] || MEAL_NAMES_I18N.de)[meal] || meal;
   return `<article class="dish">
-    <div class="dish__meal">${mealName}</div>
+    <div class="dish__meal">${mealName} <span class="tag">${t('recipe_offline_badge')}</span></div>
     <h4 class="dish__title">${esc(d.title)}</h4>
     <span class="dish__time">≈ ${d.time} min</span>
     <ol>${d.steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol>
@@ -708,7 +756,7 @@ function onPlanClick(e) {
     const prod = S.productsMap.get(id);
     if (!S.banned.includes(id)) S.banned.push(id);
     store.set('banned', S.banned);
-    toast(`${getFoodName(prod, S.lang)}: ${t('toast_excluded')}`);
+    toast(`${mname(prod)}: ${t('toast_excluded')}`);
     runPlan({ newSeed: false });
   }
   if (act === 'to-list') {
@@ -749,13 +797,29 @@ function savePlan() {
   toast(t('toast_saved'));
 }
 
+/* AI recipes: explicit user action only. Order of checks:
+   1. offline → notice + offline templates, no request is sent;
+   2. one-time consent (what is sent, where, how the key is stored);
+   3. API key (stored per device, explained in the dialog);
+   4. request with localized, classified errors and an offline fallback. */
 async function runAI() {
   const box = $('#ai-out');
   const mealNames = MEAL_NAMES_I18N[S.lang] || MEAL_NAMES_I18N.de;
+  const r = current();
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    showAiError(box, r, 'network');
+    return;
+  }
+  if (!store.get('ai-consent', false)) {
+    const accepted = await askAiConsent();
+    if (!accepted) return;
+    store.set('ai-consent', true);
+  }
   if (!S.ai.key) {
     openDialog(`<div class="dialog__body">
       <h2 class="h-section">${t('ai_settings_title')}</h2>
       <p class="small muted">${t('ai_settings_sub')}</p>
+      <p class="small muted">${t('ai_key_storage')}</p>
       <form method="dialog" class="form" id="ai-quick">
         <label class="field"><span class="label">Gemini API Key</span><input name="key" type="password" placeholder="AIza…" required autocomplete="off"></label>
         <div class="dialog__foot"><button class="btn btn--ghost" value="cancel" formnovalidate>${t('cancel')}</button><button class="btn btn--primary" value="ok">${t('save')}</button></div>
@@ -770,8 +834,7 @@ async function runAI() {
       });
     return;
   }
-  const r = current();
-  box.innerHTML = `<div class="skel" style="height:220px"></div><p class="xs muted" style="margin-top:.5rem">Gemini AI is cooking recipes… (5–15s)</p>`;
+  box.innerHTML = `<div class="skel" style="height:220px"></div><p class="xs muted" style="margin-top:.5rem">${t('ai_loading')}</p>`;
   try {
     S.aiText = await geminiRecipes({
       apiKey: S.ai.key, model: S.ai.model, menu: r.menu,
@@ -780,10 +843,43 @@ async function runAI() {
     renderPlan();
     $('#ai-out')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   } catch (e) {
-    const d = buildDishes(r.menu, S.lang);
-    box.innerHTML = `<div class="notice notice--err" style="margin-bottom:.75rem"><span><b>AI unavailable:</b> ${esc(String(e.message))}.</span></div>
-      <div class="dishes">${MEAL_ORDER.filter(m => d[m]).map(m => dishHTML(m, d[m])).join('')}</div>`;
+    if (e?.code === 'bad-key') {
+      // Do not keep a rejected key: the next attempt asks for a fresh one.
+      S.ai.key = '';
+      store.set('ai', S.ai);
+    }
+    showAiError(box, r, e?.code || 'unknown');
   }
+}
+
+function askAiConsent() {
+  return new Promise(resolve => {
+    let settled = false;
+    const done = value => { if (!settled) { settled = true; resolve(value); } };
+    openDialog(`<div class="dialog__body">
+      <h2 class="h-section">${t('ai_consent_title')}</h2>
+      <ul class="small muted" style="margin:0 0 1rem 1.1rem;padding:0;display:grid;gap:.4rem">
+        <li>${t('ai_consent_what')}</li>
+        <li>${t('ai_consent_where')}</li>
+        <li>${t('ai_consent_key')}</li>
+      </ul>
+      <form method="dialog" class="dialog__foot">
+        <button class="btn btn--ghost" value="cancel">${t('ai_consent_no')}</button>
+        <button class="btn btn--primary" value="ok">${t('ai_consent_ok')}</button>
+      </form></div>`,
+      dlg => {
+        $('form', dlg).addEventListener('submit', ev => done(ev.submitter?.value === 'ok'));
+        dlg.addEventListener('close', () => done(false));
+      });
+  });
+}
+
+function showAiError(box, r, code) {
+  const key = { 'bad-key': 'ai_err_badkey', quota: 'ai_err_quota', network: 'ai_err_network' }[code] || 'ai_err_unknown';
+  const d = buildDishes(r.menu, S.lang);
+  box.innerHTML = `<div class="notice notice--err" style="margin-bottom:.75rem"><span>${t(key)}</span></div>
+    <div class="dishes">${MEAL_ORDER.filter(m => d[m]).map(m => dishHTML(m, d[m])).join('')}</div>`;
+  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 /* ─── Interactive Diet Builder ─────────────────────────────── */
@@ -904,7 +1000,7 @@ function renderBuilder() {
             return `
               <li class="builder-item-row" data-bidx="${idx}">
                 <div class="builder-item-info">
-                  <div class="builder-item-name">${esc(getFoodName(prod, S.lang))}</div>
+                  <div class="builder-item-name">${esc(mname(prod))}</div>
                   <div class="builder-item-macros">${fmtInt(nut.calories)} kcal · P ${nut.protein}g · F ${nut.fat}g · C ${nut.carbs}g</div>
                 </div>
                 <div class="builder-stepper">
@@ -1064,7 +1160,7 @@ function openBuilderAddFoodDialog(meal) {
   `, dlg => {
     let q = '', cat = '';
     const BASIC_IDS = S.market === 'de'
-      ? [138, 57, 483, 160, 239, 601, 602, 268, 158, 384, 365, 319, 316, 350, 112, 108, 96, 604, 443, 60, 426, 327, 344]
+      ? [610, 57, 483, 160, 239, 601, 602, 268, 158, 384, 365, 319, 316, 350, 112, 108, 96, 604, 443, 60, 426, 327, 344]
       : [53, 67, 57, 138, 160, 239, 253, 120, 121, 122, 95, 483, 319, 324, 325, 326, 327, 344, 384, 365, 158, 60];
 
     const renderPicker = () => {
@@ -1090,7 +1186,7 @@ function openBuilderAddFoodDialog(meal) {
         return `
           <button type="button" class="food-picker-item" data-add-id="${p.id}">
             <div>
-              <div class="item-title">${esc(getFoodName(p, S.lang))}</div>
+              <div class="item-title">${esc(mname(p))}</div>
               <div class="item-meta">${p.k} kcal · P ${p.p}g · F ${p.f}g · C ${p.cb}g / 100g</div>
             </div>
             <div style="text-align:right">
@@ -1134,7 +1230,7 @@ function openBuilderAddFoodDialog(meal) {
       saveBuilderState(S.builder);
       renderBuilder();
       dlg.close();
-      toast(`${getFoodName(prod, S.lang)} ${t('toast_added_to_list')}`);
+      toast(`${mname(prod)} ${t('toast_added_to_list')}`);
     });
   });
 }
@@ -1248,31 +1344,21 @@ async function buildWeekNow() {
 /* ─── Shopping List ─────────────────────────────────────────── */
 function addToList(menus, source) {
   const agg = aggregateShopping(menus);
-  const map = new Map(S.list.items.map(i => [i.id, i]));
-  agg.forEach(a => {
-    const cur = map.get(a.id);
-    if (cur) {
-      cur.grams += a.grams;
-      cur.cost = Math.round((cur.cost + a.cost) * 100) / 100;
-      cur.done = false;
-    } else {
-      map.set(a.id, { ...a, done: false });
-    }
-  });
-  S.list = { items: [...map.values()], source: S.list.items.length ? 'Combined Diet' : source };
+  const { items, added, merged } = mergeListItems(S.list.items, agg);
+  S.list = { items, source: S.list.items.length ? t('list_source_combined') : source };
   store.set('list', S.list);
   updateBadges();
-  toast(t('toast_added_to_list'));
+  toast(merged > 0 ? t('toast_list_merged', added, merged) : t('toast_added_to_list'));
 }
 
 function qtyText(i) {
-  const n = (i.name + ' ' + (i.n_de || '')).toLowerCase();
-  const isEgg = n.includes('яйце') || n.includes('ei') || n.includes('egg');
+  const n = ((i.dname || i.name) + ' ' + (i.n_de || '') + ' ' + (i.n_en || '')).toLowerCase();
+  const isEgg = i.category === 'eggs' || n.includes('яйце') || n.includes('яйц') || n.includes('hühnerei') || /\begg\b/.test(n);
   if (isEgg) {
     const pcs = Math.ceil(i.grams / 60);
     return `${pcs} ${S.lang === 'de' ? (pcs === 1 ? 'Ei' : 'Eier') : S.lang === 'en' ? (pcs === 1 ? 'egg' : 'eggs') : 'шт'}`;
   }
-  const isLiquid = i.liquid || /молоко|кефір|ряжанк|йогурт|олія|öl|milch|juice/.test(n);
+  const isLiquid = i.liquid || /молоко|кефір|кефир|kefir|ряжанк|йогурт|олія|öl|milch|juice/.test(n);
   if (i.grams >= 1000) return `${(i.grams / 1000).toFixed(2).replace(/\.?0+$/, '')} ${isLiquid ? 'L' : 'kg'}`;
   return `${Math.round(i.grams)} ${isLiquid ? 'ml' : 'g'}`;
 }
@@ -1298,30 +1384,73 @@ function renderList() {
     <div class="card shop-total">
       <div>
         <p class="eyebrow">${esc(S.list.source || t('list_title'))}</p>
-        <div class="h-section num">${fmtCost(total)}</div>
-        <span class="xs muted">${t('list_to_buy_left', fmtCost(left), done, items.length)}</span>
+        <div class="h-section num" data-total>${fmtCost(total)}</div>
+        <span class="xs muted" data-left>${t('list_to_buy_left', fmtCost(left), done, items.length)}</span>
       </div>
     </div>
     ${Object.entries(groups).sort((a, b) => (S.cats[a[0]]?.id ?? 99) - (S.cats[b[0]]?.id ?? 99)).map(([cat, list]) => `
       <div class="shop-group">
         <h3>${esc(getCatName(S.cats[cat], S.lang) || cat)}</h3>
-        <ul class="shop-list">${list.sort((a, b) => a.done - b.done).map(i => `
+        <ul class="shop-list">${list.map(i => `
           <li class="shop-item ${i.done ? 'done' : ''}" data-id="${i.id}">
-            <input type="checkbox" ${i.done ? 'checked' : ''} aria-label="Checked: ${esc(getFoodName(i, S.lang))}">
-            <div>
-              <div class="shop-item__name">${esc(shortName(i.name, i, S.lang))}</div>
-              <div class="shop-item__qty">${qtyText(i)}</div>
-            </div>
-            <div class="shop-item__cost">${fmtCost(i.cost)}</div>
+            <input class="shop-check" id="shop-${i.id}" type="checkbox" ${i.done ? 'checked' : ''} aria-label="${esc(mname(i))}">
+            <label class="shop-item__body" for="shop-${i.id}">
+              <span class="shop-item__name">${esc(shortName(i.name, i, S.lang))}</span>
+              <span class="shop-item__qty">${qtyText(i)}</span>
+            </label>
+            <span class="shop-item__cost">${fmtCost(i.cost)}</span>
           </li>`).join('')}</ul>
       </div>`).join('')}
   </div>`;
 }
 
+/* One state update path for the shopping list: the checkbox is the control
+   (tap, click on its label, keyboard Space), a tap elsewhere on the row
+   flips the same checkbox. Updates are surgical — no full re-render, so
+   focus, scroll position and row order never jump on mobile. */
+function setItemDone(id, done, li = null, box = null) {
+  const it = S.list.items.find(i => i.id === id);
+  if (!it) return;
+  it.done = Boolean(done);
+  store.set('list', S.list);
+  const row = li || $(`.shop-item[data-id="${id}"]`, $('#list-output'));
+  if (row) {
+    row.classList.toggle('done', it.done);
+    const check = box || $('.shop-check', row);
+    if (check) check.checked = it.done;
+  }
+  refreshListTotals();
+  updateBadges();
+}
+
+function refreshListTotals() {
+  const items = S.list.items;
+  const total = items.reduce((s, i) => s + i.cost, 0);
+  const left = items.filter(i => !i.done).reduce((s, i) => s + i.cost, 0);
+  const done = items.filter(i => i.done).length;
+  const totalEl = $('[data-total]', $('#list-output'));
+  const leftEl = $('[data-left]', $('#list-output'));
+  if (totalEl) totalEl.textContent = fmtCost(total);
+  if (leftEl) leftEl.textContent = t('list_to_buy_left', fmtCost(left), done, items.length);
+}
+
+function onListChange(e) {
+  const box = e.target.closest?.('.shop-check');
+  if (!box) return;
+  const li = box.closest('.shop-item');
+  if (!li) return;
+  setItemDone(+li.dataset.id, box.checked, li, box);
+}
+
 function onListClick(e) {
-  const li = e.target.closest('.shop-item'); if (!li) return;
-  const it = S.list.items.find(i => i.id === +li.dataset.id); if (!it) return;
-  it.done = !it.done; store.set('list', S.list); renderList(); updateBadges();
+  const li = e.target.closest?.('.shop-item');
+  if (!li) return;
+  // Clicks on the checkbox or its label already produce a `change` event.
+  if (e.target.closest('input, label')) return;
+  const box = $('.shop-check', li);
+  if (!box) return;
+  box.checked = !box.checked;
+  setItemDone(+li.dataset.id, box.checked, li, box);
 }
 
 function updateBadges() {
@@ -1405,7 +1534,7 @@ function renderFoods() {
   const q = F.q.trim().toLowerCase();
   if (q) {
     list = list.filter(p => {
-      const allNames = (p.n + ' ' + (p.n_de || '') + ' ' + (p.n_en || '') + ' ' + (p.n_ru || '')).toLowerCase();
+      const allNames = ((p.dname || '') + ' ' + ((p.offer && p.offer.brand) || '') + ' ' + p.n + ' ' + (p.n_de || '') + ' ' + (p.n_en || '') + ' ' + (p.n_ru || '')).toLowerCase();
       return allNames.includes(q);
     });
   }
@@ -1414,7 +1543,7 @@ function renderFoods() {
   else list = list.filter(p => p.c !== 'alcohol');
 
   const sorters = {
-    name: (a, b) => getFoodName(a, S.lang).localeCompare(getFoodName(b, S.lang)),
+    name: (a, b) => mname(a).localeCompare(mname(b)),
     price: (a, b) => a.displayPrice - b.displayPrice,
     protein_per_cost: (a, b) => (b.p / b.displayPrice) - (a.p / a.displayPrice),
     kcal_per_cost: (a, b) => (b.k / b.displayPrice) - (a.k / a.displayPrice),
@@ -1435,16 +1564,27 @@ function renderFoods() {
       <button class="food" data-id="${p.id}">
         <div>
           <div class="food__name">
-            ${esc(getFoodName(p, S.lang))}
+            ${esc(mname(p))}${conceptSub(p)}
             ${S.banned.includes(p.id) ? `<span class="tag tag--accent">${t('food_banned_tag')}</span>` : ''}
             ${p.custom ? `<span class="tag tag--ok">${t('food_price_override_tag')}</span>` : ''}
           </div>
           <div class="food__meta">${p.k} kcal · P ${p.p}g · F ${p.f}g · C ${p.cb}g</div>
         </div>
-        <div class="food__price">${fmtCost(p.displayPrice)}<small>${t('price_per_100g')}</small></div>
+        <div class="food__price">${p.price_status === 'estimate' && !p.custom ? '~' : ''}${fmtCost(p.displayPrice)}<small>${t('price_per_100g')}</small></div>
       </button>`).join('')}
     </div>
     ${list.length > F.limit ? `<div class="foods-more"><button class="btn" id="foods-more">${t('foods_show_more', Math.min(60, list.length - F.limit))}</button></div>` : ''}`;
+}
+
+function provenanceLine(p) {
+  const bits = [];
+  if (p.price_status === 'estimate' && !(p.id in S.prices)) bits.push(t('src_price_estimate'));
+  if (p.nutrition_src === 'legacy-unverified') bits.push(t('src_nutrition_unverified'));
+  else if (p.nutrition_src) bits.push(`${t('src_nutrition')}: ${p.nutrition_src}`);
+  const refDate = p.price_date || S.data.price_reference_date;
+  if (refDate) bits.push(`${t('src_updated')}: ${refDate}`);
+  if (!bits.length) return '';
+  return `<p class="xs muted" style="margin:-.25rem 0 .5rem">${esc(bits.join(' · '))}</p>`;
 }
 
 function openFood(id) {
@@ -1456,13 +1596,16 @@ function openFood(id) {
   openDialog(`<div class="dialog__body">
     <div>
       <p class="eyebrow">${esc(getCatName(S.cats[p.c], S.lang))}</p>
-      <h2 class="h-section">${esc(getFoodName(p, S.lang))}</h2>
+      <h2 class="h-section">${esc(mname(p))}</h2>
+      ${conceptSub(p) ? `<p class="small muted" style="margin:-.5rem 0 .5rem">${conceptSub(p)}</p>` : ''}
+      ${p.offer && (p.offer.brand || p.offer.pack) ? `<p class="small muted" style="margin:-.25rem 0 .5rem">${esc([p.offer.brand, p.offer.pack].filter(Boolean).join(' · '))}</p>` : ''}
+      ${provenanceLine(p)}
     </div>
     <div class="norms" style="margin:0">
       <div class="norm"><b>${p.k}</b><span>kcal / 100 g</span></div>
-      <div class="norm"><b>${p.p} g</b><span>Protein</span></div>
-      <div class="norm"><b>${p.f} g</b><span>Fett</span></div>
-      <div class="norm"><b>${p.cb} g</b><span>Carbs</span></div>
+      <div class="norm"><b>${p.p} g</b><span>${t('kpi_protein')}</span></div>
+      <div class="norm"><b>${p.f} g</b><span>${t('kpi_fat')}</span></div>
+      <div class="norm"><b>${p.cb} g</b><span>${t('kpi_carbs')}</span></div>
     </div>
     <form method="dialog" class="form" id="food-form">
       <label class="field">
@@ -1518,7 +1661,7 @@ function renderMore() {
   const rows = [...new Set([...priced, ...S.banned])].map(id => S.productsMap.get(id)).filter(Boolean);
   ov.innerHTML = rows.length ? `<ul class="saved">${rows.map(p => `
     <li>
-      <div><b>${esc(getFoodName(p, S.lang))}</b><span>${S.banned.includes(p.id) ? t('food_banned_tag') : ''}${S.banned.includes(p.id) && p.id in S.prices ? ' · ' : ''}${p.id in S.prices ? `${fmtCost(S.prices[p.id])}` : ''}</span></div>
+      <div><b>${esc(mname(p))}</b><span>${S.banned.includes(p.id) ? t('food_banned_tag') : ''}${S.banned.includes(p.id) && p.id in S.prices ? ' · ' : ''}${p.id in S.prices ? `${fmtCost(S.prices[p.id])}` : ''}</span></div>
       <button class="btn btn--sm btn--ghost" data-oact="reset" data-id="${p.id}">${t('reset_override')}</button>
     </li>`).join('')}</ul>`
     : `<p class="small muted">${t('overrides_empty')}</p>`;
@@ -1621,6 +1764,7 @@ async function boot() {
   initTheme();
   try {
     installMarketData(await loadMarketData(S.market));
+    healListNames();
   } catch (error) {
     console.error(error);
     $('#plan-empty').innerHTML = '<div class="notice notice--err">Food data could not be loaded. Please refresh.</div>';
@@ -1646,6 +1790,9 @@ async function boot() {
   $('#week-output').addEventListener('click', onWeekClick);
   $('#week-build').addEventListener('click', buildWeekNow);
 
+  // Note: keyboard support comes from the native checkbox itself (Tab + Space).
+  // No extra key handler: a second tab stop per row would only add noise.
+  $('#list-output').addEventListener('change', onListChange);
   $('#list-output').addEventListener('click', onListClick);
   $('#list-clear').addEventListener('click', () => {
     openDialog(`<div class="dialog__body">

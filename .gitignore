@@ -11,3 +11,8 @@ venv/
 .vscode/
 .DS_Store
 Thumbs.db
+# Node (local tests / e2e tooling only; the app itself has no build step)
+node_modules/
+test-results/
+playwright-report/
+playwright/.auth/

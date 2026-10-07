@@ -393,9 +393,6 @@
     "158": 0.67,
     "144": 0.65,
     "152": 0.9,
-    "137": 0.35,
-    "139": 0.32,
-    "138": 0.3,
     "155": 0.75,
     "148": 0.68,
     "150": 1.8,
@@ -527,6 +524,204 @@
     "603": 0.25,
     "604": 1.49,
     "605": 0.99,
-    "606": 0.22
+    "606": 0.22,
+    "610": 0.3,
+    "611": 0.32,
+    "612": 0.35
+  },
+  "offers": {
+    "57": {
+      "name": "Haferflocken, Blütenzarte Köllnflocken",
+      "kind": "on_pack",
+      "brand": "Kölln",
+      "pack": "500g",
+      "barcode": "4000540000108",
+      "nutrition": {
+        "p": 14.0,
+        "f": 6.7,
+        "cb": 56.0,
+        "k": 361.0
+      },
+      "nutrition_src": "OFF:4000540000108",
+      "source": "Open Food Facts (ODbL)",
+      "updated": "2026-10-05",
+      "fetched": "2026-10-07",
+      "note": "Label carbs (EU label excludes fibre); fibre 11g/100g on label."
+    },
+    "610": {
+      "name": "Magerquark",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "611": {
+      "name": "Speisequark, ca. 9% Fett",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "612": {
+      "name": "Speisequark, ca. 18% Fett (Sahnequark-Art)",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "53": {
+      "name": "Buchweizen (gekocht)",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "67": {
+      "name": "Buchweizengrütze (trocken)",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "60": {
+      "name": "Reisbrei (gekocht)",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "95": {
+      "name": "Sonnenblumenöl",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "96": {
+      "name": "Olivenöl",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "108": {
+      "name": "Rapsöl",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "112": {
+      "name": "Frischmilch, 2,5% Fett",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "120": {
+      "name": "Kefir, 0% Fett",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "121": {
+      "name": "Kefir, 1% Fett",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "122": {
+      "name": "Kefir, 2,5% Fett",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "158": {
+      "name": "Gouda jung",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "160": {
+      "name": "Hühnereier (Größe M)",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "239": {
+      "name": "Hähnchenbrustfilet",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "253": {
+      "name": "Hühnerleber",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "268": {
+      "name": "Lachsfilet",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "316": {
+      "name": "Brokkoli",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "319": {
+      "name": "Salzkartoffeln (gekocht)",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "324": {
+      "name": "Porree",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "325": {
+      "name": "Speisezwiebeln",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "326": {
+      "name": "Möhren",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "344": {
+      "name": "Tomaten",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "350": {
+      "name": "Blattspinat",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "365": {
+      "name": "Bananen",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "384": {
+      "name": "Äpfel",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "423": {
+      "name": "Erdnüsse",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "426": {
+      "name": "Mandelkerne",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "443": {
+      "name": "Rote Linsen (gekocht)",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "480": {
+      "name": "Roggenmischbrot",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "483": {
+      "name": "Vollkornbrot",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "601": {
+      "name": "Skyr natur",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "602": {
+      "name": "Körniger Frischkäse (Hüttenkäse)",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    },
+    "604": {
+      "name": "Putenbrust-Aufschnitt",
+      "kind": "generic",
+      "updated": "2026-10-07"
+    }
   }
 }

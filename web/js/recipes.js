@@ -9,11 +9,10 @@ import { currentLang, getFoodName } from './i18n.js';
 const lc = s => (s ?? '').toLowerCase();
 
 export function shortName(n, item = null, lang = currentLang) {
-  if (item) {
-    const loc = getFoodName(item, lang);
-    if (loc) return loc.replace(/\s*\(\d+ шт.*?\)/g, '').replace(/\s*\(([^)]*)\)/g, ', $1').trim();
-  }
-  return String(n ?? '').replace(/\s*\(\d+ шт.*?\)/g, '').replace(/\s*\(([^)]*)\)/g, ', $1').replace(/\s+/g, ' ').trim();
+  // Market display name first (item.dname/item.name); concept translations
+  // only as a fallback for legacy rows without market names.
+  const base = item?.dname || item?.name || (item ? getFoodName(item, lang) : null) || n;
+  return String(base ?? '').replace(/\s*\(\d+ шт.*?\)/g, '').replace(/\s*\(([^)]*)\)/g, ', $1').replace(/\s+/g, ' ').trim();
 }
 
 export function fmtAmount(item, lang = currentLang) {
@@ -24,7 +23,7 @@ export function fmtAmount(item, lang = currentLang) {
     const unit = lang === 'de' ? (pcs === 1 ? 'Ei' : 'Eier') : lang === 'en' ? (pcs === 1 ? 'egg' : 'eggs') : (pcs === 1 ? 'яйцо' : 'яйца');
     return `${pcs} ${unit} (${item.amount_g} g)`;
   }
-  const isLiquid = item.liquid || /молоко|кефір|ряжанк|йогурт|олія|öl|milch|juice|wasser|water/.test(n);
+  const isLiquid = item.liquid || /молоко|кефір|кефир|kefir|ряжанк|йогурт|олія|öl|milch|juice|wasser|water/.test(n);
   if (isLiquid) {
     if (n.includes('олія') || n.includes('öl') || n.includes('oil')) {
       const tbsp = item.amount_g / 15;
@@ -230,7 +229,7 @@ function mainDish(items, lang, type = 'lunch') {
   if (!items.length) return null;
   const protein = items.find(i => ['poultry', 'meat', 'fish_seafood', 'legumes', 'eggs'].includes(i.category))
     || items.find(i => /quark|сир/i.test(i.name + ' ' + (i.n_de || '')));
-  const side = items.find(i => i !== protein && (i.category === 'grains' || i.category === 'flour' || /kartoffel|картоп|reis|рис|lentil|сочевиц/i.test(i.name + ' ' + (i.n_de || ''))));
+  const side = items.find(i => i !== protein && (i.category === 'grains' || i.category === 'flour' || /kartoffel|картоп|reis|рис|lentil|lins|сочевиц/i.test((i.dname || i.name || '') + ' ' + (i.n_de || ''))));
   const vegs = items.filter(i => i.category === 'vegetables' && i !== side);
 
   const pName = protein ? getFoodName(protein, lang) : '';
@@ -365,6 +364,17 @@ const GEMINI_MODELS = [
   'gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'
 ];
 
+/** Classify a Gemini failure for honest, localized UI messages. */
+export function classifyGeminiError(status) {
+  if (status === 400 || status === 401 || status === 403) return 'bad-key';
+  if (status === 429) return 'quota';
+  return 'unknown';
+}
+
+export function geminiError(code, message) {
+  return Object.assign(new Error(message), { code });
+}
+
 export async function geminiRecipes({ apiKey, model, menu, profile, mealNames, lang = currentLang }) {
   const goalMap = {
     de: { loss: 'Gewichtsverlust (Fettabbau)', maintain: 'Gewicht halten', gain: 'Muskelaufbau' },
@@ -410,16 +420,19 @@ ${langInstruction}`;
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        lastErr = new Error(data?.error?.message || `HTTP ${res.status}`);
-        if ([404, 429, 503].includes(res.status)) continue;
-        throw lastErr;
+        lastErr = geminiError(classifyGeminiError(res.status), data?.error?.message || `HTTP ${res.status}`);
+        if ([404, 429, 503].includes(res.status)) continue; // try the next model
+        break; // non-retryable (e.g. rejected key): stop model-hopping
       }
       const text = data?.candidates?.[0]?.content?.parts?.map(p => p.text).join('') || '';
-      if (!text) { lastErr = new Error('Empty response'); continue; }
+      if (!text) { lastErr = geminiError('unknown', 'Empty response'); continue; }
       return { text, model: m };
-    } catch (e) { lastErr = e; if (e instanceof TypeError) break; }
+    } catch (e) {
+      lastErr = e instanceof TypeError ? geminiError('network', 'network unavailable') : e;
+      if (e instanceof TypeError) break; // offline: other models will fail too
+    }
   }
-  throw lastErr || new Error('Gemini API unavailable');
+  throw lastErr || geminiError('unknown', 'Gemini API unavailable');
 }
 
 export function miniMarkdown(md) {
