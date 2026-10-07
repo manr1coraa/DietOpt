@@ -1,4 +1,4 @@
-// Real-browser shopping-list behaviour: tap, keyboard, persistence, reload.
+// Real-browser shopping-list behaviour: tap/click, keyboard, persistence, reload.
 import { test, expect } from '@playwright/test';
 
 const LIST = {
@@ -9,19 +9,29 @@ const LIST = {
   ],
 };
 
+// NOTE: seeding goes through page.evaluate + reload (not addInitScript),
+// so that later in-test reloads preserve real app state instead of
+// re-applying the seed.
 test.beforeEach(async ({ page }) => {
-  await page.addInitScript(list => {
+  await page.goto('#/list');
+  await page.evaluate(list => {
     localStorage.setItem('dietopt.lang', 'de');
     localStorage.setItem('dietopt.market', 'de');
     localStorage.setItem('dietopt.de.list', JSON.stringify(list));
   }, LIST);
-  await page.goto('#/list');
+  await page.reload();
   await expect(page.locator('.shop-item')).toHaveCount(2);
 });
 
-test('tapping the checkbox strikes the row immediately', async ({ page }) => {
+// Real tap on the touch project, real click on desktop.
+async function tapOrClick(locator) {
+  if (test.info().project.name === 'chromium-mobile') await locator.tap();
+  else await locator.click();
+}
+
+test('checkbox press strikes the row immediately', async ({ page }) => {
   const row = page.locator('.shop-item[data-id="57"]');
-  await row.locator('.shop-check').tap();
+  await tapOrClick(row.locator('.shop-check'));
   await expect(row).toHaveClass(/done/);
   await expect(row.locator('.shop-item__name')).toHaveCSS('text-decoration-line', 'line-through');
   await expect(row.locator('.shop-check')).toBeChecked();
@@ -35,8 +45,8 @@ test('keyboard Space on the focused checkbox toggles', async ({ page }) => {
   await expect(page.locator('.shop-item[data-id="57"]')).toHaveClass(/done/);
 });
 
-test('tapping the row outside controls toggles too', async ({ page }) => {
-  await page.locator('.shop-item[data-id="160"] .shop-item__cost').tap();
+test('pressing the row outside controls toggles too', async ({ page }) => {
+  await tapOrClick(page.locator('.shop-item[data-id="160"] .shop-item__cost'));
   await expect(page.locator('.shop-item[data-id="160"]')).toHaveClass(/done/);
 });
 
@@ -44,7 +54,6 @@ test('checked state survives reload, order stays stable', async ({ page }) => {
   await page.locator('.shop-item[data-id="57"] .shop-check').check();
   const orderBefore = await page.locator('.shop-item').evaluateAll(els => els.map(e => e.dataset.id));
   await page.reload();
-  await page.goto('#/list');
   await expect(page.locator('.shop-item[data-id="57"]')).toHaveClass(/done/);
   await expect(page.locator('.shop-item[data-id="57"] .shop-check')).toBeChecked();
   const orderAfter = await page.locator('.shop-item').evaluateAll(els => els.map(e => e.dataset.id));

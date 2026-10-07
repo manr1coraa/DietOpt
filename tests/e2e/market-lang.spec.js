@@ -1,12 +1,15 @@
 // Market and interface language are independent, persisted settings.
 import { test, expect } from '@playwright/test';
 
+// Seeding via evaluate + reload (not addInitScript): later in-test reloads
+// must preserve real app state instead of re-applying the seed.
 test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
+  await page.goto('#/plan');
+  await page.evaluate(() => {
     localStorage.setItem('dietopt.lang', 'ru');
     localStorage.setItem('dietopt.market', 'de');
   });
-  await page.goto('#/plan');
+  await page.reload();
 });
 
 test('Germany market + Russian language coexist', async ({ page }) => {
