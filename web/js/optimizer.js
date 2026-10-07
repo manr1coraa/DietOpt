@@ -138,6 +138,24 @@ const isBlacklisted = name => {
 const T = (name, meals) => ({ name, meals });
 
 export const STANDARD_TEMPLATES = [
+  T('🇩🇪 Deutscher Fitness-Klassiker', {
+    breakfast: [['вівсян', 0.8, 2.0], ['молоко 2.5', 1.0, 2.5], ['банан', 0.8, 1.5]],
+    snack: [['яблуко', 0.8, 2.0], ['мигдаль', 0.15, 0.4]],
+    lunch: [['куряча грудка', 1.5, 3.0], ['рисов', 0.8, 2.5], ['капуста броколі', 0.8, 2.0], ['олія', 0.05, 0.2]],
+    dinner: [['сир кисломолочний нежирн', 1.5, 3.0], ['хліб цільнозерн', 0.6, 1.5], ['яйце куряче', 1.0, 2.0], ['огірки свіж', 0.8, 1.8]],
+  }),
+  T('🇩🇪 Deutsches Abendbrot & Alltag', {
+    breakfast: [['хліб цільнозерн', 0.8, 1.5], ['сир гауда', 0.3, 0.6], ['яйце куряче', 1.0, 2.0], ['томати свіж', 0.8, 1.5]],
+    snack: [['скир', 1.5, 2.5], ['яблуко', 0.8, 1.5]],
+    lunch: [['лосось', 1.2, 2.5], ['картопля варен', 1.5, 3.5], ['шпинат', 0.8, 2.0], ['олія', 0.05, 0.2]],
+    dinner: [['хліб цільнозерн', 0.8, 1.5], ['індич', 0.6, 1.5], ['огірки свіж', 0.8, 1.8], ['сир кисломолочний нежирн', 1.0, 2.0]],
+  }),
+  T('🇩🇪 Spar-Plan Deutschland (Aldi/Lidl)', {
+    breakfast: [['вівсян', 0.8, 2.5], ['молоко 2.5', 1.0, 2.0], ['яблуко', 0.8, 1.5]],
+    snack: [['морква', 1.0, 2.0], ['арахіс', 0.2, 0.4]],
+    lunch: [['сочевиц', 1.0, 2.5], ['картопля', 1.5, 3.5], ['морква', 0.5, 1.5], ['цибуля', 0.2, 0.5], ['олія', 0.05, 0.2]],
+    dinner: [['сир кисломолочний нежирн', 1.5, 2.5], ['хліб житн', 0.6, 1.5], ['яйце куряче', 1.0, 2.0]],
+  }),
   T('Класичний з куркою', {
     breakfast: [['вівсян', 0.6, 2.5], ['молоко 2.5', 1.0, 2.5], ['банан', 0.7, 1.5], ['масло вершк', 0.05, 0.25]],
     snack: [['яблуко', 1.0, 2.5], ['волоський горіх', 0.2, 0.5], ['йогурт', 1.0, 2.0]],
@@ -294,6 +312,7 @@ function shuffle(arr, rng) {
 
 /* ─── Фільтрація продуктів під профіль ──────────────────────── */
 export function filterProducts(allProducts, profile, extra = {}) {
+  const isEur = extra.currency === 'EUR' || profile?.currency === 'EUR';
   const excluded = new Set([...ALWAYS_EXCLUDED_CATS, ...BASIC_EXCLUDED_CATS]);
   if (profile.diet_type === 'vegetarian') VEGETARIAN_EXCLUDED.forEach(c => excluded.add(c));
   if (profile.diet_type === 'vegan') VEGAN_EXCLUDED.forEach(c => excluded.add(c));
@@ -302,10 +321,18 @@ export function filterProducts(allProducts, profile, extra = {}) {
   const banned = new Set(extra.bannedIds || []);
   const prices = extra.priceOverrides || {};
   return allProducts
-    .filter(p => p.k > 0 && p.pr > 0 && !excluded.has(p.c) && !banned.has(p.id))
+    .filter(p => p.k > 0 && !excluded.has(p.c) && !banned.has(p.id))
     .filter(p => !isBlacklisted(p.n))
-    .filter(p => { const n = p.n.toLowerCase(); for (const k of kws) if (n.includes(k)) return false; return true; })
-    .map(p => (prices[p.id] ? { ...p, pr: prices[p.id] } : p));
+    .filter(p => {
+      const allNames = (p.n + ' ' + (p.n_de || '') + ' ' + (p.n_en || '') + ' ' + (p.n_ru || '')).toLowerCase();
+      for (const k of kws) if (allNames.includes(k)) return false;
+      return true;
+    })
+    .map(p => {
+      const basePr = isEur ? (p.pr_eur ?? Math.round((p.pr / 45) * 100) / 100) : p.pr;
+      const customPr = prices[p.id];
+      return { ...p, pr: customPr != null ? customPr : basePr };
+    });
 }
 
 /* ─── Вибір конкретних продуктів під шаблон ─────────────────── */
@@ -314,7 +341,12 @@ function selectForTemplate(template, products, mode, rng) {
   const used = new Set();
   for (const meal of MEAL_ORDER) {
     for (const [kw, minP, maxP] of template.meals[meal] || []) {
-      const matches = products.filter(p => p.n.toLowerCase().includes(kw) && !used.has(p.id));
+      const kwLower = kw.toLowerCase();
+      const matches = products.filter(p => {
+        if (used.has(p.id)) return false;
+        const allNames = (p.n + ' ' + (p.n_de || '') + ' ' + (p.n_en || '') + ' ' + (p.n_ru || '')).toLowerCase();
+        return allNames.includes(kwLower);
+      });
       if (!matches.length) continue;
       const sorted = [...matches].sort((a, b) => a.pr - b.pr);
       let best;
@@ -358,7 +390,9 @@ function solveLP(selected, norms, budget, opt) {
     const v = res.x[i];
     if (v < 0.05) return;
     const item = {
-      id: s.prod.id, name: s.prod.n, category: s.prod.c, meal: s.meal,
+      id: s.prod.id, name: s.prod.n,
+      n_de: s.prod.n_de, n_en: s.prod.n_en, n_ru: s.prod.n_ru,
+      category: s.prod.c, meal: s.meal,
       amount_g: Math.round(v * 100), cost: r2(v * s.prod.pr), calories: r1(v * s.prod.k),
       protein: r1(v * s.prod.p), fat: r1(v * s.prod.f), carbs: r1(v * s.prod.cb),
       price_per_100g: s.prod.pr, liquid: !!s.prod.l,
