@@ -379,7 +379,7 @@ export async function geminiRecipes({ apiKey, model, menu, profile, mealNames, l
   }).filter(Boolean).join('\n\n');
 
   const langInstruction = lang === 'de'
-    ? 'Schreibe auf Deutsch, kurz, freundlich und praxisnah für einen Studenten in Deutschland.'
+    ? 'Schreibe auf Deutsch, kurz, freundlich und praxisnah für den Alltag in Deutschland.'
     : lang === 'en'
     ? 'Write in English, concise, friendly, and practical.'
     : lang === 'ru'

@@ -1,8 +1,5 @@
-# main.py — Головний файл FastAPI застосунку
-# Кваліфікаційна робота: Литвин А.В., ХНУ ім. В.Н. Каразіна, 2026
-# Запуск:  cd backend && uvicorn main:app --reload
-# Відкрийте http://127.0.0.1:8000 — сервер віддає веб-застосунок із ../web
-# та API (документація: http://127.0.0.1:8000/docs).
+# Optional FastAPI companion API for local development.
+# Run from this directory with: uvicorn main:app --reload
 
 import logging
 import os
@@ -62,13 +59,9 @@ async def lifespan(app: FastAPI):
 
 # ── FastAPI ──────────────────────────────────────────────────
 app = FastAPI(
-    title="DietOpt — Інформаційна система оптимізації раціону харчування студента",
-    description=(
-        "Кваліфікаційна робота бакалавра.\n"
-        "Литвин А.В., ХНУ ім. В.Н. Каразіна, 2026\n"
-        "Спеціальність 123 «Комп'ютерна інженерія»"
-    ),
-    version="3.0.0",
+    title="DietOpt — meal and shopping planner",
+    description="Optional local API for nutrition calculations, menu optimization and product lookup.",
+    version="4.0.0",
     lifespan=lifespan,
 )
 

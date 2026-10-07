@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════
-   app.js — DietOpt v4
-   Multilingual (DE, EN, RU, UK), Multi-Currency (EUR, UAH),
-   Interactive Meal Builder, Simplex Optimizer, Week Plan & PWA
+   app.js — DietOpt
+   Localized meal planning for Germany and Ukraine, with per-market data,
+   shopping lists, saved preferences and offline support.
    ═══════════════════════════════════════════════════════════════ */
 
 import {
@@ -10,27 +10,73 @@ import {
 } from './optimizer.js';
 import { buildDishes, fmtAmount, shortName, geminiRecipes, miniMarkdown } from './recipes.js';
 import {
-  currentLang, currentCurrency, setLanguage, setCurrency,
+  currentLang, currentMarket, currentCurrency, setLanguage, setMarket,
   t, fmtCost, fmtInt, getFoodName, getCatName,
   MEAL_NAMES_I18N, DAY_NAMES_I18N, ALLERGY_CHIPS_I18N,
 } from './i18n.js';
 import {
   getInitialBuilderState, saveBuilderState, calcDayTotals,
-  calcItemNutrition, convertBuilderToPlanMenu, GERMAN_PRESETS, ALL_PRESETS,
+  calcItemNutrition, convertBuilderToPlanMenu, GERMAN_PRESETS,
+  getPresetsForMarket, ALL_PRESETS,
 } from './builder.js';
+import { loadMarketData } from './market-data.js';
 
 /* ─── DOM Helpers ───────────────────────────────────────────── */
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const lc = s => String(s || '').toLowerCase();
+const productBasePrice = (product, currency = S?.currency ?? currentCurrency) => {
+  if (product?.price_currency === currency || product?.price_currency == null && currency !== 'EUR') return Number(product?.pr) || 0;
+  return currency === 'EUR' ? (product?.pr_eur ?? (Number(product?.pr || 0) / 45)) : (Number(product?.pr) || 0);
+};
 const nextFrame = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 16)));
 
 const mem = {};
+const INITIAL_MARKET = currentMarket;
+const GLOBAL_KEYS = new Set(['lang', 'theme', 'market', 'currency']);
+const LEGACY_DATA_KEYS = new Set(['profile', 'banned', 'prices', 'list', 'saved', 'ai', 'builder']);
 const store = {
-  get(k, def) { try { const v = localStorage.getItem('dietopt.' + k); return v == null ? def : JSON.parse(v); } catch { return k in mem ? mem[k] : def; } },
-  set(k, v) { try { localStorage.setItem('dietopt.' + k, JSON.stringify(v)); } catch { mem[k] = v; } },
-  del(k) { try { localStorage.removeItem('dietopt.' + k); } catch { delete mem[k]; } },
+  key(k, market = currentMarket) {
+    return GLOBAL_KEYS.has(k) ? `dietopt.${k}` : `dietopt.${market}.${k}`;
+  },
+  get(k, def) {
+    const scopedKey = this.key(k);
+    try {
+      const raw = localStorage.getItem(scopedKey);
+      if (raw != null) return JSON.parse(raw);
+      // Move existing v4 data into the region active on the first upgrade.
+      if (LEGACY_DATA_KEYS.has(k) && currentMarket === INITIAL_MARKET) {
+        const legacy = localStorage.getItem(`dietopt.${k}`);
+        if (legacy != null) {
+          localStorage.setItem(scopedKey, legacy);
+          localStorage.removeItem(`dietopt.${k}`);
+          return JSON.parse(legacy);
+        }
+      }
+    } catch {
+      const memoryKey = `${currentMarket}:${k}`;
+      if (memoryKey in mem) return mem[memoryKey];
+    }
+    return def;
+  },
+  set(k, v) {
+    const storageKey = this.key(k);
+    try { localStorage.setItem(storageKey, JSON.stringify(v)); }
+    catch { mem[`${currentMarket}:${k}`] = v; }
+  },
+  del(k) {
+    try { localStorage.removeItem(this.key(k)); }
+    catch { delete mem[`${currentMarket}:${k}`]; }
+  },
+  isPersistent() {
+    try {
+      const key = 'dietopt.storage-check';
+      localStorage.setItem(key, '1');
+      localStorage.removeItem(key);
+      return true;
+    } catch { return false; }
+  },
 };
 
 function toast(msg) {
@@ -58,6 +104,7 @@ const ICON = {
 
 /* ─── Global State ──────────────────────────────────────────── */
 const S = {
+  market: currentMarket,
   data: null,
   cats: {},
   productsMap: new Map(),
@@ -87,9 +134,10 @@ const PAGES = ['plan', 'builder', 'week', 'list', 'foods', 'more'];
 function route() {
   const [path, query] = location.hash.replace(/^#\/?/, '').split('?');
   const page = PAGES.includes(path) ? path : 'plan';
+  const navPage = ['builder', 'foods'].includes(page) ? 'more' : page;
   $$('.page').forEach(p => { p.hidden = p.dataset.page !== page; });
   $$('[data-nav]').forEach(a => {
-    if (a.dataset.nav === page) a.setAttribute('aria-current', 'page');
+    if (a.dataset.nav === navPage) a.setAttribute('aria-current', 'page');
     else a.removeAttribute('aria-current');
   });
 
@@ -121,14 +169,19 @@ function route() {
 
 /* ─── Language & Currency Handlers ──────────────────────────── */
 function updateStaticTexts() {
+  document.documentElement.setAttribute('lang', S.lang);
   document.title = t('app_title');
   const metaDesc = $('meta[name="description"]');
   if (metaDesc) metaDesc.setAttribute('content', t('app_meta_desc'));
 
   $$('[data-i18n]').forEach(el => {
     const key = el.dataset.i18n;
-    el.textContent = t(key);
+    // Translation strings are plain text; tolerate old <br> strings without showing markup.
+    el.textContent = t(key).replace(/(?:<br\s*\/?\s*>|&lt;br\s*\/?&gt;)/gi, ' ');
   });
+
+  const marketSel = $('#market-select');
+  if (marketSel) marketSel.value = S.market;
 
   // Update inputs placeholder
   const foodSearch = $('#food-search');
@@ -140,6 +193,68 @@ function updateStaticTexts() {
   // Re-render allergy chips
   renderAllergyChips();
   syncBudgetSlider();
+}
+
+function installMarketData(data) {
+  S.data = data;
+  S.cats = {};
+  S.productsMap = new Map();
+  S.data.categories.forEach(category => { S.cats[category.name] = category; });
+  S.data.products.forEach(product => { S.productsMap.set(product.id, product); });
+}
+
+let marketLoadSequence = 0;
+async function changeMarket(market) {
+  if (!['de', 'ua'].includes(market) || market === S.market) return;
+  const previousMarket = S.market;
+  const sequence = ++marketLoadSequence;
+  const select = $('#market-select');
+  if (select) select.disabled = true;
+  setMarket(market);
+  S.market = market;
+  S.currency = currentCurrency;
+
+  try {
+    const data = await loadMarketData(market);
+    if (sequence !== marketLoadSequence) return;
+    installMarketData(data);
+    S.profile = null;
+    S.norms = null;
+    S.candidates = [];
+    S.variant = 0;
+    S.basic = null;
+    S.week = null;
+    S.aiText = null;
+    S.banned = store.get('banned', []);
+    S.prices = store.get('prices', {});
+    S.list = store.get('list', { items: [], source: '' });
+    S.saved = store.get('saved', []);
+    S.ai = store.get('ai', { key: '', model: 'gemini-2.5-flash-lite' });
+    S.builder = getInitialBuilderState(market);
+    F.q = ''; F.cat = ''; F.limit = 60;
+    $('#food-search').value = '';
+    $('#food-cats').replaceChildren();
+    $('#plan-output').hidden = true;
+    $('#plan-empty').hidden = false;
+    $('#form-error').hidden = true;
+    syncBudgetSlider();
+    applyProfileForMarket();
+    syncBudgetSlider();
+    updateStaticTexts();
+    updateBadges();
+    if (select) select.value = market;
+    route();
+    toast(t('market_changed'));
+  } catch (error) {
+    console.error(error);
+    setMarket(previousMarket);
+    S.market = previousMarket;
+    S.currency = currentCurrency;
+    if (select) select.value = previousMarket;
+    toast('Could not load this market. Please try again.');
+  } finally {
+    if (select && sequence === marketLoadSequence) select.disabled = false;
+  }
 }
 
 function syncBudgetSlider() {
@@ -167,7 +282,7 @@ function syncBudgetSlider() {
 
 function initLanguageAndCurrency() {
   const langSel = $('#lang-select');
-  const currSel = $('#currency-select');
+  const marketSel = $('#market-select');
   if (langSel) {
     langSel.value = S.lang;
     langSel.addEventListener('change', e => {
@@ -178,20 +293,9 @@ function initLanguageAndCurrency() {
       toast(t('toast_prices_saved'));
     });
   }
-  if (currSel) {
-    currSel.value = S.currency;
-    currSel.addEventListener('change', e => {
-      setCurrency(e.target.value);
-      S.currency = e.target.value;
-      syncBudgetSlider();
-      if (S.profile) {
-        S.profile.budget = +$('#budget-input').value;
-        S.profile.currency = S.currency;
-        runPlan({ newSeed: false });
-      }
-      route();
-      toast(t('toast_prices_saved'));
-    });
+  if (marketSel) {
+    marketSel.value = S.market;
+    marketSel.addEventListener('change', e => changeMarket(e.target.value));
   }
 }
 
@@ -206,6 +310,28 @@ function renderAllergyChips() {
     const pressed = currentChecked.includes(v);
     return `<button type="button" class="chip chip--warn" data-allergy="${v}" aria-pressed="${pressed}">${l}</button>`;
   }).join('');
+}
+
+function defaultProfile() {
+  return {
+    gender: 'male', age: 25, height: 178, weight: 75,
+    activity_level: 'light', goal: 'maintain',
+    budget: S.currency === 'EUR' ? 8 : 200,
+    diet_type: 'standard', allergy_chips: [], allergies_extra: '',
+    allergies: '', currency: S.currency, market: S.market,
+  };
+}
+
+function applyProfileForMarket() {
+  const saved = store.get('profile', null);
+  writeForm(saved || defaultProfile());
+  if (saved) {
+    S.profile = { ...readForm(), market: S.market, currency: S.currency };
+    S.norms = calculateNorms(S.profile);
+  } else {
+    S.profile = null;
+    S.norms = null;
+  }
 }
 
 function initForm() {
@@ -229,20 +355,19 @@ function initForm() {
     runPlan();
   });
 
-  const saved = store.get('profile', null);
-  if (saved) {
-    writeForm(saved);
-  } else {
-    // Default profile for Germany
-    const def = {
-      gender: 'male', age: 25, height: 178, weight: 75,
-      activity_level: 'light', goal: 'maintain',
-      budget: S.currency === 'EUR' ? 8 : 200,
-      diet_type: 'standard', allergy_chips: [], allergies_extra: '',
-      allergies: '', currency: S.currency
-    };
-    writeForm(def);
-  }
+  applyProfileForMarket();
+
+  const persistProfile = () => {
+    const p = readForm();
+    const valid = p.age >= 14 && p.age <= 80 && p.height >= 140 && p.height <= 220
+      && p.weight >= 40 && p.weight <= 200;
+    if (valid) {
+      S.profile = p;
+      S.norms = calculateNorms(p);
+      store.set('profile', p);
+    }
+  };
+  f.addEventListener('change', persistProfile);
 }
 
 function readForm() {
@@ -257,6 +382,7 @@ function readForm() {
     activity_level: f.activity_level.value,
     goal: f.goal.value,
     budget: +f.budget.value,
+    market: S.market,
     currency: S.currency,
     diet_type: f.diet_type.value,
     allergy_chips: chips,
@@ -431,41 +557,43 @@ function renderPlan() {
       <button class="btn" data-act="print">${ICON.print} ${t('btn_print')}</button>
     </div>
 
-    <div class="card">
-      <div class="card__head">
-        <h3 class="h-section">${t('macros_balance')}</h3>
-        <span class="xs muted">${t('macros_legend')}</span>
+    <details class="details-card">
+      <summary>${t('more_nutrition')}</summary>
+      <div class="details-card__content">
+        <section class="card">
+          <div class="card__head">
+            <h3 class="h-section">${t('macros_balance')}</h3>
+            <span class="xs muted">${t('macros_legend')}</span>
+          </div>
+          ${macrosHTML(r, n)}
+        </section>
+        <section class="card">
+          <div class="card__head">
+            <h3 class="h-section">${t('recipes_section')}</h3>
+            <button class="btn btn--sm no-print" data-act="ai">${ICON.spark} ${t('recipes_ai_btn')}</button>
+          </div>
+          <div id="ai-out">
+            ${S.aiText ? `<div class="ai-box">${miniMarkdown(S.aiText.text)}<p class="xs muted">Model: ${esc(S.aiText.model)}</p></div>` : `<div class="dishes">${MEAL_ORDER.filter(m => dishes[m]).map(m => dishHTML(m, dishes[m])).join('')}</div>`}
+          </div>
+        </section>
+        ${S.basic ? compareHTML(opt, S.basic) : ''}
+        <section class="card">
+          <details class="more" style="border:0;padding:0">
+            <summary>${t('more_norms_title')}</summary>
+            <div class="norms">
+              <div class="norm"><b>${fmtInt(n.bmr)}</b><span>${t('norm_bmr_sub')}</span></div>
+              <div class="norm"><b>${fmtInt(n.tdee)}</b><span>${t('norm_tdee_sub')}</span></div>
+              <div class="norm"><b>${fmtInt(n.target_calories)}</b><span>${t('norm_target_sub')}</span></div>
+              <div class="norm"><b>${n.bmi}</b><span>${t('norm_bmi_sub', esc(n.bmi_status))}</span></div>
+              <div class="norm"><b>${fmtInt(n.fat_min)}–${fmtInt(n.fat_max)} g</b><span>${t('kpi_fat')}</span></div>
+              <div class="norm"><b>${fmtInt(n.carbs_min)}–${fmtInt(n.carbs_max)} g</b><span>${t('kpi_carbs')}</span></div>
+              <div class="norm"><b>${(n.water_ml / 1000).toFixed(1)} L</b><span>${t('norm_water_sub')}</span></div>
+              <div class="norm"><b>${r.solve_time_ms ?? '—'} ms</b><span>${t('norm_solve_time')}</span></div>
+            </div>
+          </details>
+        </section>
       </div>
-      ${macrosHTML(r, n)}
-    </div>
-
-    <div class="card">
-      <div class="card__head">
-        <h3 class="h-section">${t('recipes_section')}</h3>
-        <button class="btn btn--sm no-print" data-act="ai">${ICON.spark} ${t('recipes_ai_btn')}</button>
-      </div>
-      <div id="ai-out">
-        ${S.aiText ? `<div class="ai-box">${miniMarkdown(S.aiText.text)}<p class="xs muted">Model: ${esc(S.aiText.model)}</p></div>` : `<div class="dishes">${MEAL_ORDER.filter(m => dishes[m]).map(m => dishHTML(m, dishes[m])).join('')}</div>`}
-      </div>
-    </div>
-
-    ${S.basic ? compareHTML(opt, S.basic) : ''}
-
-    <div class="card">
-      <details class="more" style="border:0;padding:0">
-        <summary>${t('more_norms_title')}</summary>
-        <div class="norms">
-          <div class="norm"><b>${fmtInt(n.bmr)}</b><span>${t('norm_bmr_sub')}</span></div>
-          <div class="norm"><b>${fmtInt(n.tdee)}</b><span>${t('norm_tdee_sub')}</span></div>
-          <div class="norm"><b>${fmtInt(n.target_calories)}</b><span>${t('norm_target_sub')}</span></div>
-          <div class="norm"><b>${n.bmi}</b><span>${t('norm_bmi_sub', esc(n.bmi_status))}</span></div>
-          <div class="norm"><b>${fmtInt(n.fat_min)}–${fmtInt(n.fat_max)} g</b><span>${t('kpi_fat')}</span></div>
-          <div class="norm"><b>${fmtInt(n.carbs_min)}–${fmtInt(n.carbs_max)} g</b><span>${t('kpi_carbs')}</span></div>
-          <div class="norm"><b>${(n.water_ml / 1000).toFixed(1)} L</b><span>${t('norm_water_sub')}</span></div>
-          <div class="norm"><b>${r.solve_time_ms ?? '—'} ms</b><span>${t('norm_solve_time')}</span></div>
-        </div>
-      </details>
-    </div>`;
+    </details>`;
 }
 
 function mealHTML(meal, items, dish) {
@@ -658,8 +786,29 @@ async function runAI() {
   }
 }
 
-/* ─── Interactive Diet Builder (Baukasten) ──────────────────── */
+/* ─── Interactive Diet Builder ─────────────────────────────── */
+const PRESET_I18N = {
+  fitness: 'preset_fitness',
+  abendbrot: 'preset_abendbrot',
+  spar: 'preset_budget',
+  student_ua: 'preset_student',
+  classic_ua: 'preset_home',
+  power_ua: 'preset_sport',
+  balanced_world: 'preset_balanced',
+};
+
+function renderBuilderPresets() {
+  const host = $('#builder-presets');
+  if (!host) return;
+  const presets = getPresetsForMarket(S.market);
+  host.innerHTML = Object.entries(presets).map(([key, preset]) => {
+    const label = PRESET_I18N[key] ? t(PRESET_I18N[key]) : preset.name;
+    return `<button type="button" class="chip chip--preset" data-preset="${key}">${esc(label)}</button>`;
+  }).join('');
+}
+
 function renderBuilder() {
+  renderBuilderPresets();
   const dashboard = $('#builder-dashboard');
   const mealsContainer = $('#builder-meals');
   if (!dashboard || !mealsContainer) return;
@@ -897,8 +1046,7 @@ function openBuilderAddFoodDialog(meal) {
 
       <div class="chips chips--scroll" id="picker-cats">
         <button type="button" class="chip" data-pcat="" aria-pressed="true">${t('all_cats')}</button>
-        <button type="button" class="chip chip--preset" data-pcat="german_basics">⭐ 🇩🇪 Basics</button>
-        <button type="button" class="chip chip--preset" data-pcat="ua_basics">⭐ 🇺🇦 Базові</button>
+        <button type="button" class="chip chip--preset" data-pcat="market_basics">⭐ ${S.market === 'de' ? '🇩🇪' : '🇺🇦'} ${t('market_basics')}</button>
         <button type="button" class="chip" data-pcat="dairy">🥛 ${getCatName(S.cats.dairy, S.lang)}</button>
         <button type="button" class="chip" data-pcat="grains">🌾 ${getCatName(S.cats.grains, S.lang)}</button>
         <button type="button" class="chip" data-pcat="poultry">🍗 ${getCatName(S.cats.poultry, S.lang)}</button>
@@ -915,15 +1063,14 @@ function openBuilderAddFoodDialog(meal) {
     </div>
   `, dlg => {
     let q = '', cat = '';
-    const GERMAN_BASIC_IDS = [138, 57, 483, 160, 239, 601, 602, 268, 158, 384, 365, 319, 316, 350, 112, 108, 96, 604, 443, 60, 426, 327, 344];
-    const UA_BASIC_IDS = [53, 67, 57, 138, 160, 239, 253, 120, 121, 122, 95, 483, 319, 324, 325, 326, 327, 344, 384, 365, 158, 60];
+    const BASIC_IDS = S.market === 'de'
+      ? [138, 57, 483, 160, 239, 601, 602, 268, 158, 384, 365, 319, 316, 350, 112, 108, 96, 604, 443, 60, 426, 327, 344]
+      : [53, 67, 57, 138, 160, 239, 253, 120, 121, 122, 95, 483, 319, 324, 325, 326, 327, 344, 384, 365, 158, 60];
 
     const renderPicker = () => {
       let filtered = allProds;
-      if (cat === 'german_basics') {
-        filtered = filtered.filter(p => GERMAN_BASIC_IDS.includes(p.id));
-      } else if (cat === 'ua_basics') {
-        filtered = filtered.filter(p => UA_BASIC_IDS.includes(p.id));
+      if (cat === 'market_basics') {
+        filtered = filtered.filter(p => BASIC_IDS.includes(p.id));
       } else if (cat) {
         filtered = filtered.filter(p => p.c === cat);
       }
@@ -939,7 +1086,7 @@ function openBuilderAddFoodDialog(meal) {
       const shown = filtered.slice(0, 50);
 
       listEl.innerHTML = shown.map(p => {
-        const price = (S.currency === 'EUR') ? (p.pr_eur ?? (p.pr / 45)) : p.pr;
+        const price = productBasePrice(p);
         return `
           <button type="button" class="food-picker-item" data-add-id="${p.id}">
             <div>
@@ -1185,19 +1332,69 @@ function updateBadges() {
   });
 }
 
+const BACKUP_KEYS = ['profile', 'banned', 'prices', 'list', 'saved', 'builder'];
+function exportBackup() {
+  const data = Object.fromEntries(BACKUP_KEYS.map(key => [key, store.get(key, null)]));
+  const backup = {
+    app: 'DietOpt', schema: 1, market: S.market,
+    exported_at: new Date().toISOString(), data,
+  };
+  const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `dietopt-backup-${S.market}-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  toast(t('backup_exported'));
+}
+
+function validBackupData(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+  if (data.list != null && (!Array.isArray(data.list.items) || data.list.items.length > 1000)) return false;
+  if (data.saved != null && (!Array.isArray(data.saved) || data.saved.length > 100)) return false;
+  if (data.banned != null && (!Array.isArray(data.banned) || data.banned.some(id => !Number.isFinite(Number(id))))) return false;
+  if (data.prices != null && (typeof data.prices !== 'object' || Array.isArray(data.prices))) return false;
+  if (data.builder != null && (typeof data.builder !== 'object' || Array.isArray(data.builder))) return false;
+  return true;
+}
+
+async function importBackup(file) {
+  if (!file) return;
+  try {
+    if (file.size > 2_000_000) throw new Error('invalid');
+    const backup = JSON.parse(await file.text());
+    if (backup.app !== 'DietOpt' || backup.schema !== 1 || !validBackupData(backup.data)) throw new Error('invalid');
+    if (backup.market !== S.market) {
+      toast(t('backup_market_mismatch'));
+      return;
+    }
+    for (const key of BACKUP_KEYS) {
+      if (Object.hasOwn(backup.data, key)) store.set(key, backup.data[key]);
+    }
+    toast(t('backup_imported'));
+    setTimeout(() => location.reload(), 550);
+  } catch (error) {
+    console.error(error);
+    toast(t('backup_invalid'));
+  }
+}
+
 /* ─── Food Database ─────────────────────────────────────────── */
 const F = { q: '', cat: '', sort: 'name', limit: 60 };
 
 function renderFoods() {
   const catsEl = $('#food-cats');
-  if (catsEl && !catsEl.childElementCount) {
-    catsEl.innerHTML = `<button class="chip" data-cat="" aria-pressed="true">${t('all_cats')}</button>` +
+  if (catsEl) {
+    catsEl.innerHTML = `<button class="chip" data-cat="" aria-pressed="${F.cat === ''}">${t('all_cats')}</button>` +
       S.data.categories.filter(c => c.name !== 'alcohol').map(c => `
-        <button class="chip" data-cat="${c.name}" aria-pressed="false">${esc(getCatName(c, S.lang))}</button>`).join('');
+        <button class="chip" data-cat="${c.name}" aria-pressed="${F.cat === c.name}">${esc(getCatName(c, S.lang))}</button>`).join('');
   }
 
   let list = S.data.products.map(p => {
-    const basePr = (S.currency === 'EUR') ? (p.pr_eur ?? (p.pr / 45)) : p.pr;
+    const basePr = productBasePrice(p);
     return {
       ...p,
       displayPrice: S.prices[p.id] ?? basePr,
@@ -1227,7 +1424,7 @@ function renderFoods() {
   list.sort(sorters[F.sort] || sorters.name);
   const out = $('#foods-output');
   if (!list.length) {
-    out.innerHTML = `<div class="panel empty"><b>0 Items found</b><span>Try a different query or category filter.</span></div>`;
+    out.innerHTML = `<div class="panel empty"><b>${t('foods_empty_title')}</b><span>${t('foods_empty_sub')}</span></div>`;
     return;
   }
 
@@ -1244,7 +1441,7 @@ function renderFoods() {
           </div>
           <div class="food__meta">${p.k} kcal · P ${p.p}g · F ${p.f}g · C ${p.cb}g</div>
         </div>
-        <div class="food__price">${fmtCost(p.displayPrice)}<small>per 100g</small></div>
+        <div class="food__price">${fmtCost(p.displayPrice)}<small>${t('price_per_100g')}</small></div>
       </button>`).join('')}
     </div>
     ${list.length > F.limit ? `<div class="foods-more"><button class="btn" id="foods-more">${t('foods_show_more', Math.min(60, list.length - F.limit))}</button></div>` : ''}`;
@@ -1252,7 +1449,7 @@ function renderFoods() {
 
 function openFood(id) {
   const p = S.productsMap.get(id);
-  const basePr = (S.currency === 'EUR') ? (p.pr_eur ?? (p.pr / 45)) : p.pr;
+  const basePr = productBasePrice(p);
   const currentPr = S.prices[id] ?? basePr;
   const banned = S.banned.includes(id);
 
@@ -1262,7 +1459,7 @@ function openFood(id) {
       <h2 class="h-section">${esc(getFoodName(p, S.lang))}</h2>
     </div>
     <div class="norms" style="margin:0">
-      <div class="norm"><b>${p.k}</b><span>kcal / 100g</span></div>
+      <div class="norm"><b>${p.k}</b><span>kcal / 100 g</span></div>
       <div class="norm"><b>${p.p} g</b><span>Protein</span></div>
       <div class="norm"><b>${p.f} g</b><span>Fett</span></div>
       <div class="norm"><b>${p.cb} g</b><span>Carbs</span></div>
@@ -1310,8 +1507,8 @@ function renderMore() {
     <li>
       <div><b>${esc(s.label)}</b><span>${new Date(s.date).toLocaleDateString(S.lang === 'de' ? 'de-DE' : S.lang === 'en' ? 'en-US' : 'ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · ${fmtInt(s.result.total_calories)} kcal</span></div>
       <div class="row-gap">
-        <button class="btn btn--sm" data-sact="open" data-id="${s.id}">Open</button>
-        <button class="btn btn--sm btn--ghost" data-sact="del" data-id="${s.id}" aria-label="Delete">${ICON.x}</button>
+        <button class="btn btn--sm" data-sact="open" data-id="${s.id}">${t('saved_open')}</button>
+        <button class="btn btn--sm btn--ghost" data-sact="del" data-id="${s.id}" aria-label="${t('saved_delete')}">${ICON.x}</button>
       </div>
     </li>`).join('')}</ul>`
     : `<p class="small muted">${t('saved_empty')}</p>`;
@@ -1326,12 +1523,15 @@ function renderMore() {
     </li>`).join('')}</ul>`
     : `<p class="small muted">${t('overrides_empty')}</p>`;
 
-  const f = $('#ai-form');
-  if (f) {
-    f.key.value = S.ai.key || '';
-    f.model.value = S.ai.model || 'gemini-2.5-flash-lite';
+  const status = $('#storage-status');
+  if (status) status.textContent = t(store.isPersistent() ? 'storage_status_local' : 'storage_status_session');
+  const marketName = t(S.market === 'de' ? 'market_de' : 'market_ua');
+  const marketNote = $('#storage-market-detail');
+  if (marketNote) marketNote.textContent = t('storage_market_detail', marketName);
+  const aboutDb = $('#about-db');
+  if (aboutDb) {
+    aboutDb.textContent = `${fmtInt(S.data.products.length)} ${t('foods_count')} · ${S.data.currency}/100 g · ${t('price_estimate_short')}`;
   }
-  $('#about-db').textContent = `${S.data.products.length} foods (German, English, Ukrainian, Russian), prices in EUR & UAH`;
 }
 
 function onMoreClick(e) {
@@ -1420,24 +1620,16 @@ function initPWA() {
 async function boot() {
   initTheme();
   try {
-    const res = await fetch('data/products.json');
-    S.data = await res.json();
-  } catch {
-    $('#plan-empty').innerHTML = '<div class="notice notice--err">Failed to load food database. Please refresh.</div>';
+    installMarketData(await loadMarketData(S.market));
+  } catch (error) {
+    console.error(error);
+    $('#plan-empty').innerHTML = '<div class="notice notice--err">Food data could not be loaded. Please refresh.</div>';
     return;
   }
-
-  S.data.categories.forEach(c => { S.cats[c.name] = c; });
-  S.data.products.forEach(p => { S.productsMap.set(p.id, p); });
 
   initLanguageAndCurrency();
   initForm();
   updateStaticTexts();
-
-  if (store.get('profile', null)) {
-    S.profile = readForm();
-    S.norms = calculateNorms(S.profile);
-  }
 
   initPWA();
   updateBadges();
@@ -1479,6 +1671,12 @@ async function boot() {
     shareOrCopy({ title: t('list_title'), text: `${t('list_title')} (${fmtCost(total)}):\n${lines.join('\n')}` });
   });
 
+  $('#backup-export')?.addEventListener('click', exportBackup);
+  $('#backup-file')?.addEventListener('change', e => {
+    importBackup(e.target.files?.[0]);
+    e.target.value = '';
+  });
+
   $('#food-search').addEventListener('input', e => { F.q = e.target.value; F.limit = 60; renderFoods(); });
   $('#food-sort').addEventListener('change', e => { F.sort = e.target.value; renderFoods(); });
   $('#food-cats').addEventListener('click', e => {
@@ -1513,7 +1711,13 @@ async function boot() {
       </form></div>`,
       d => $('form', d).addEventListener('submit', ev => {
         if (ev.submitter?.value !== 'yes') return;
-        ['profile', 'banned', 'prices', 'list', 'saved', 'ai', 'builder', 'currency', 'lang'].forEach(store.del);
+        try {
+          for (let i = localStorage.length - 1; i >= 0; i--) {
+            const key = localStorage.key(i);
+            if (key?.startsWith('dietopt.')) localStorage.removeItem(key);
+          }
+        } catch {}
+        Object.keys(mem).forEach(key => delete mem[key]);
         location.hash = '#/plan'; location.reload();
       }));
   });

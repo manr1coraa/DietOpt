@@ -1,9 +1,8 @@
 /* ═══════════════════════════════════════════════════════════════
-   builder.js — Interactive Meal & Diet Builder for DietOpt
-   Supports German presets, custom assembly, live KBJU & € totals
+   builder.js — meal builder, regional presets and live nutrition totals
    ═══════════════════════════════════════════════════════════════ */
 
-import { t, fmtCost, fmtInt, getFoodName, getCatName } from './i18n.js';
+import { currentMarket } from './i18n.js';
 
 export const GERMAN_PRESETS = {
   fitness: {
@@ -164,31 +163,73 @@ export const UKRAINIAN_PRESETS = {
   }
 };
 
+export const INTERNATIONAL_PRESETS = {
+  balanced_world: {
+    name: '🌍 International · ausgewogen',
+    items: {
+      breakfast: [
+        { id: 57, grams: 70 },
+        { id: 112, grams: 180 },
+        { id: 365, grams: 100 },
+      ],
+      snack: [
+        { id: 384, grams: 150 },
+      ],
+      lunch: [
+        { id: 239, grams: 160 },
+        { id: 60, grams: 180 },
+        { id: 316, grams: 150 },
+        { id: 96, grams: 10 },
+      ],
+      dinner: [
+        { id: 160, grams: 120 },
+        { id: 483, grams: 70 },
+        { id: 344, grams: 120 },
+      ],
+    },
+  },
+};
+
 export const ALL_PRESETS = {
   ...GERMAN_PRESETS,
   ...UKRAINIAN_PRESETS,
+  ...INTERNATIONAL_PRESETS,
 };
 
-const POPULAR_GERMAN_IDS = [138, 57, 483, 160, 239, 601, 602, 268, 158, 384, 365, 319, 316, 350, 112, 108, 96, 604, 443, 60, 426, 327, 344];
-
-export function getInitialBuilderState() {
-  try {
-    const saved = localStorage.getItem('dietopt.builder');
-    if (saved) return JSON.parse(saved);
-  } catch {}
-  // Default to the German Fitness Classic
-  return JSON.parse(JSON.stringify(GERMAN_PRESETS.fitness.items));
+export function getPresetsForMarket(market = currentMarket) {
+  const regional = market === 'ua' ? UKRAINIAN_PRESETS : GERMAN_PRESETS;
+  return { ...regional, ...INTERNATIONAL_PRESETS };
 }
 
-export function saveBuilderState(state) {
+const INITIAL_MARKET = currentMarket;
+export function getInitialBuilderState(market = currentMarket) {
+  const scopedKey = `dietopt.${market}.builder`;
   try {
-    localStorage.setItem('dietopt.builder', JSON.stringify(state));
+    let saved = localStorage.getItem(scopedKey);
+    if (!saved && market === INITIAL_MARKET) {
+      saved = localStorage.getItem('dietopt.builder');
+      if (saved) {
+        localStorage.setItem(scopedKey, saved);
+        localStorage.removeItem('dietopt.builder');
+      }
+    }
+    if (saved) return JSON.parse(saved);
+  } catch {}
+  const preset = market === 'ua' ? UKRAINIAN_PRESETS.classic_ua : GERMAN_PRESETS.fitness;
+  return JSON.parse(JSON.stringify(preset.items));
+}
+
+export function saveBuilderState(state, market = currentMarket) {
+  try {
+    localStorage.setItem(`dietopt.${market}.builder`, JSON.stringify(state));
   } catch {}
 }
 
 export function calcItemNutrition(prod, grams, currency = 'EUR', priceOverrides = {}) {
   const r = grams / 100;
-  const basePr = (currency === 'EUR') ? (prod.pr_eur ?? (prod.pr / 45)) : prod.pr;
+  const basePr = prod.price_currency === currency || (prod.price_currency == null && currency !== 'EUR')
+    ? prod.pr
+    : currency === 'EUR' ? (prod.pr_eur ?? (prod.pr / 45)) : prod.pr;
   const pr = priceOverrides[prod.id] != null ? priceOverrides[prod.id] : basePr;
   return {
     cost: Math.round(r * pr * 100) / 100,
