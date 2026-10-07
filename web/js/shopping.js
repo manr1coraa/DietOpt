@@ -38,7 +38,7 @@ export function mergeListItems(existing, additions) {
       cur.cost = r2(cur.cost + add.cost);
       cur.done = false; // new unbought quantities arrived → needs buying again
       // Keep the freshest display names (older stored lists may lack translations).
-      for (const key of ['name', 'n', 'n_de', 'n_en', 'n_ru']) {
+      for (const key of ['dname', 'name', 'n', 'n_de', 'n_en', 'n_ru']) {
         if (add[key] && !cur[key]) cur[key] = add[key];
       }
       merged += 1;
