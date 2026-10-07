@@ -364,6 +364,17 @@ const GEMINI_MODELS = [
   'gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'
 ];
 
+/** Classify a Gemini failure for honest, localized UI messages. */
+export function classifyGeminiError(status) {
+  if (status === 400 || status === 401 || status === 403) return 'bad-key';
+  if (status === 429) return 'quota';
+  return 'unknown';
+}
+
+export function geminiError(code, message) {
+  return Object.assign(new Error(message), { code });
+}
+
 export async function geminiRecipes({ apiKey, model, menu, profile, mealNames, lang = currentLang }) {
   const goalMap = {
     de: { loss: 'Gewichtsverlust (Fettabbau)', maintain: 'Gewicht halten', gain: 'Muskelaufbau' },
@@ -409,16 +420,19 @@ ${langInstruction}`;
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        lastErr = new Error(data?.error?.message || `HTTP ${res.status}`);
-        if ([404, 429, 503].includes(res.status)) continue;
-        throw lastErr;
+        lastErr = geminiError(classifyGeminiError(res.status), data?.error?.message || `HTTP ${res.status}`);
+        if ([404, 429, 503].includes(res.status)) continue; // try the next model
+        break; // non-retryable (e.g. rejected key): stop model-hopping
       }
       const text = data?.candidates?.[0]?.content?.parts?.map(p => p.text).join('') || '';
-      if (!text) { lastErr = new Error('Empty response'); continue; }
+      if (!text) { lastErr = geminiError('unknown', 'Empty response'); continue; }
       return { text, model: m };
-    } catch (e) { lastErr = e; if (e instanceof TypeError) break; }
+    } catch (e) {
+      lastErr = e instanceof TypeError ? geminiError('network', 'network unavailable') : e;
+      if (e instanceof TypeError) break; // offline: other models will fail too
+    }
   }
-  throw lastErr || new Error('Gemini API unavailable');
+  throw lastErr || geminiError('unknown', 'Gemini API unavailable');
 }
 
 export function miniMarkdown(md) {

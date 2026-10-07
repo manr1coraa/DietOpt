@@ -43,8 +43,8 @@ const nextFrame = () => new Promise(r => requestAnimationFrame(() => setTimeout(
 
 const mem = {};
 const INITIAL_MARKET = currentMarket;
-const GLOBAL_KEYS = new Set(['lang', 'theme', 'market', 'currency']);
-const LEGACY_DATA_KEYS = new Set(['profile', 'banned', 'prices', 'list', 'saved', 'ai', 'builder']);
+const GLOBAL_KEYS = new Set(['lang', 'theme', 'market', 'currency', 'ai', 'ai-consent']);
+const LEGACY_DATA_KEYS = new Set(['profile', 'banned', 'prices', 'list', 'saved', 'builder']);
 const store = {
   key(k, market = currentMarket) {
     return GLOBAL_KEYS.has(k) ? `dietopt.${k}` : `dietopt.${market}.${k}`;
@@ -211,6 +211,20 @@ function installMarketData(data) {
   S.data.categories.forEach(category => { S.cats[category.name] = category; });
   S.data.products.forEach(product => { S.productsMap.set(product.id, product); });
 }
+
+/* One-time: the AI key used to be stored per market; keep one per device. */
+try {
+  if (localStorage.getItem('dietopt.ai') == null) {
+    for (const m of ['de', 'ua']) {
+      const legacy = localStorage.getItem(`dietopt.${m}.ai`);
+      if (legacy) {
+        localStorage.setItem('dietopt.ai', legacy);
+        localStorage.removeItem(`dietopt.${m}.ai`);
+        break;
+      }
+    }
+  }
+} catch { /* storage unavailable */ }
 
 /* Backfill market display names into shopping rows stored before they
    existed (their `name` was always Ukrainian). Rows whose product left the
@@ -586,6 +600,19 @@ function renderPlan() {
       <button class="btn" data-act="print">${ICON.print} ${t('btn_print')}</button>
     </div>
 
+    <section class="card" id="recipes-card">
+      <div class="card__head">
+        <div>
+          <h3 class="h-section">${t('recipes_section')}</h3>
+          <p class="xs muted" style="margin:.25rem 0 0">${t(S.aiText ? 'recipes_ai_note' : 'recipes_offline_note')}</p>
+        </div>
+        <button class="btn btn--sm no-print" data-act="ai">${ICON.spark} ${t('recipes_ai_btn')}</button>
+      </div>
+      <div id="ai-out">
+        ${S.aiText ? `<div class="ai-box">${miniMarkdown(S.aiText.text)}<p class="xs muted">${t('recipes_ai_badge', esc(S.aiText.model))}</p></div>` : `<div class="dishes">${MEAL_ORDER.filter(m => dishes[m]).map(m => dishHTML(m, dishes[m])).join('')}</div>`}
+      </div>
+    </section>
+
     <details class="details-card">
       <summary>${t('more_nutrition')}</summary>
       <div class="details-card__content">
@@ -595,15 +622,6 @@ function renderPlan() {
             <span class="xs muted">${t('macros_legend')}</span>
           </div>
           ${macrosHTML(r, n)}
-        </section>
-        <section class="card">
-          <div class="card__head">
-            <h3 class="h-section">${t('recipes_section')}</h3>
-            <button class="btn btn--sm no-print" data-act="ai">${ICON.spark} ${t('recipes_ai_btn')}</button>
-          </div>
-          <div id="ai-out">
-            ${S.aiText ? `<div class="ai-box">${miniMarkdown(S.aiText.text)}<p class="xs muted">Model: ${esc(S.aiText.model)}</p></div>` : `<div class="dishes">${MEAL_ORDER.filter(m => dishes[m]).map(m => dishHTML(m, dishes[m])).join('')}</div>`}
-          </div>
         </section>
         ${S.basic ? compareHTML(opt, S.basic) : ''}
         <section class="card">
@@ -657,7 +675,7 @@ function mealHTML(meal, items, dish) {
 function dishHTML(meal, d) {
   const mealName = (MEAL_NAMES_I18N[S.lang] || MEAL_NAMES_I18N.de)[meal] || meal;
   return `<article class="dish">
-    <div class="dish__meal">${mealName}</div>
+    <div class="dish__meal">${mealName} <span class="tag">${t('recipe_offline_badge')}</span></div>
     <h4 class="dish__title">${esc(d.title)}</h4>
     <span class="dish__time">≈ ${d.time} min</span>
     <ol>${d.steps.map(s => `<li>${esc(s)}</li>`).join('')}</ol>
@@ -778,13 +796,29 @@ function savePlan() {
   toast(t('toast_saved'));
 }
 
+/* AI recipes: explicit user action only. Order of checks:
+   1. offline → notice + offline templates, no request is sent;
+   2. one-time consent (what is sent, where, how the key is stored);
+   3. API key (stored per device, explained in the dialog);
+   4. request with localized, classified errors and an offline fallback. */
 async function runAI() {
   const box = $('#ai-out');
   const mealNames = MEAL_NAMES_I18N[S.lang] || MEAL_NAMES_I18N.de;
+  const r = current();
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    showAiError(box, r, 'network');
+    return;
+  }
+  if (!store.get('ai-consent', false)) {
+    const accepted = await askAiConsent();
+    if (!accepted) return;
+    store.set('ai-consent', true);
+  }
   if (!S.ai.key) {
     openDialog(`<div class="dialog__body">
       <h2 class="h-section">${t('ai_settings_title')}</h2>
       <p class="small muted">${t('ai_settings_sub')}</p>
+      <p class="small muted">${t('ai_key_storage')}</p>
       <form method="dialog" class="form" id="ai-quick">
         <label class="field"><span class="label">Gemini API Key</span><input name="key" type="password" placeholder="AIza…" required autocomplete="off"></label>
         <div class="dialog__foot"><button class="btn btn--ghost" value="cancel" formnovalidate>${t('cancel')}</button><button class="btn btn--primary" value="ok">${t('save')}</button></div>
@@ -799,8 +833,7 @@ async function runAI() {
       });
     return;
   }
-  const r = current();
-  box.innerHTML = `<div class="skel" style="height:220px"></div><p class="xs muted" style="margin-top:.5rem">Gemini AI is cooking recipes… (5–15s)</p>`;
+  box.innerHTML = `<div class="skel" style="height:220px"></div><p class="xs muted" style="margin-top:.5rem">${t('ai_loading')}</p>`;
   try {
     S.aiText = await geminiRecipes({
       apiKey: S.ai.key, model: S.ai.model, menu: r.menu,
@@ -809,10 +842,43 @@ async function runAI() {
     renderPlan();
     $('#ai-out')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   } catch (e) {
-    const d = buildDishes(r.menu, S.lang);
-    box.innerHTML = `<div class="notice notice--err" style="margin-bottom:.75rem"><span><b>AI unavailable:</b> ${esc(String(e.message))}.</span></div>
-      <div class="dishes">${MEAL_ORDER.filter(m => d[m]).map(m => dishHTML(m, d[m])).join('')}</div>`;
+    if (e?.code === 'bad-key') {
+      // Do not keep a rejected key: the next attempt asks for a fresh one.
+      S.ai.key = '';
+      store.set('ai', S.ai);
+    }
+    showAiError(box, r, e?.code || 'unknown');
   }
+}
+
+function askAiConsent() {
+  return new Promise(resolve => {
+    let settled = false;
+    const done = value => { if (!settled) { settled = true; resolve(value); } };
+    openDialog(`<div class="dialog__body">
+      <h2 class="h-section">${t('ai_consent_title')}</h2>
+      <ul class="small muted" style="margin:0 0 1rem 1.1rem;padding:0;display:grid;gap:.4rem">
+        <li>${t('ai_consent_what')}</li>
+        <li>${t('ai_consent_where')}</li>
+        <li>${t('ai_consent_key')}</li>
+      </ul>
+      <form method="dialog" class="dialog__foot">
+        <button class="btn btn--ghost" value="cancel">${t('ai_consent_no')}</button>
+        <button class="btn btn--primary" value="ok">${t('ai_consent_ok')}</button>
+      </form></div>`,
+      dlg => {
+        $('form', dlg).addEventListener('submit', ev => done(ev.submitter?.value === 'ok'));
+        dlg.addEventListener('close', () => done(false));
+      });
+  });
+}
+
+function showAiError(box, r, code) {
+  const key = { 'bad-key': 'ai_err_badkey', quota: 'ai_err_quota', network: 'ai_err_network' }[code] || 'ai_err_unknown';
+  const d = buildDishes(r.menu, S.lang);
+  box.innerHTML = `<div class="notice notice--err" style="margin-bottom:.75rem"><span>${t(key)}</span></div>
+    <div class="dishes">${MEAL_ORDER.filter(m => d[m]).map(m => dishHTML(m, d[m])).join('')}</div>`;
+  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 /* ─── Interactive Diet Builder ─────────────────────────────── */

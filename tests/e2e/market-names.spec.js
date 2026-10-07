@@ -25,18 +25,25 @@ test('UA market shows Ukrainian goods even with Russian UI', async ({ page }) =>
   await page.locator('#food-search').fill('кисломолоч');
   await expect(page.locator('.food__name').first()).toContainText('Сир кисломолочний');
   await page.locator('#food-search').fill('quark');
-  await expect(page.locator('#foods-output')).toContainText(/ничего не найдено|не знайдено|No products|Keine Produkte/i);
+  // 'quark' still matches translated aliases (e.g. Schoko-Quarkriegel), but
+  // the German Quark goods themselves must be absent from the UA market.
+  await expect(page.locator('#foods-output')).not.toContainText('Magerquark');
+  await expect(page.locator('#foods-output')).not.toContainText('Speisequark');
 });
 
 test('switching UI language does not rename market goods', async ({ page }) => {
   await seed(page, 'de', 'de');
+  const marketName = () => page.locator('.food__name').first()
+    .evaluate(el => el.childNodes[0].textContent.trim());
   await page.locator('#food-search').fill('quark');
-  const before = await page.locator('.food__name').first().textContent();
+  const before = await marketName();
   await page.locator('#lang-select').selectOption('ru');
   await page.locator('#food-search').fill('quark');
-  const after = await page.locator('.food__name').first().textContent();
+  const after = await marketName();
   expect(after).toBe(before);
   expect(after).toMatch(/Magerquark|Speisequark/);
+  // The UI-language concept subtitle MAY appear — the market name must not move.
+  await expect(page.locator('.food__name').first()).toContainText('Magerquark');
 });
 
 test('estimates carry ~ and provenance is shown in the dialog', async ({ page }) => {
