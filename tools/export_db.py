@@ -64,9 +64,10 @@ def main() -> None:
         prior = previous_products.get(row["id"], {})
         product = {
             key: prior[key]
-            for key in ("n_ru", "n_en", "n_de")
-            if prior.get(key)
+            for key in ("n_ru", "n_en", "n_de", "src", "similar_to", "note")
+            if prior.get(key) is not None
         }
+        product.setdefault("src", "legacy-unverified")
         product.update({
             "id": row["id"],
             "n": row["name"].strip(),
