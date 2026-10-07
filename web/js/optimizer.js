@@ -527,7 +527,13 @@ export function buildWeek(products, profile, norms, seed = Date.now()) {
 export function aggregateShopping(menus) {
   const map = new Map();
   for (const menu of menus) for (const it of menu) {
-    const cur = map.get(it.id) || { id: it.id, name: it.name, category: it.category, grams: 0, cost: 0, liquid: it.liquid };
+    // Carry display names in every interface language: without them the
+    // shopping list can only show the base (Ukrainian) name for all locales.
+    const cur = map.get(it.id) || {
+      id: it.id, name: it.name, n: it.n ?? it.name,
+      n_de: it.n_de, n_en: it.n_en, n_ru: it.n_ru,
+      category: it.category, grams: 0, cost: 0, liquid: it.liquid,
+    };
     cur.grams += it.amount_g; cur.cost += it.cost;
     map.set(it.id, cur);
   }

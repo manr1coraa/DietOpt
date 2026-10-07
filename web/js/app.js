@@ -20,6 +20,7 @@ import {
   getPresetsForMarket, ALL_PRESETS,
 } from './builder.js';
 import { loadMarketData } from './market-data.js';
+import { mergeListItems } from './shopping.js';
 
 /* ─── DOM Helpers ───────────────────────────────────────────── */
 const $ = (s, el = document) => el.querySelector(s);
@@ -1248,21 +1249,11 @@ async function buildWeekNow() {
 /* ─── Shopping List ─────────────────────────────────────────── */
 function addToList(menus, source) {
   const agg = aggregateShopping(menus);
-  const map = new Map(S.list.items.map(i => [i.id, i]));
-  agg.forEach(a => {
-    const cur = map.get(a.id);
-    if (cur) {
-      cur.grams += a.grams;
-      cur.cost = Math.round((cur.cost + a.cost) * 100) / 100;
-      cur.done = false;
-    } else {
-      map.set(a.id, { ...a, done: false });
-    }
-  });
-  S.list = { items: [...map.values()], source: S.list.items.length ? 'Combined Diet' : source };
+  const { items, added, merged } = mergeListItems(S.list.items, agg);
+  S.list = { items, source: S.list.items.length ? t('list_source_combined') : source };
   store.set('list', S.list);
   updateBadges();
-  toast(t('toast_added_to_list'));
+  toast(merged > 0 ? t('toast_list_merged', added, merged) : t('toast_added_to_list'));
 }
 
 function qtyText(i) {
@@ -1298,30 +1289,73 @@ function renderList() {
     <div class="card shop-total">
       <div>
         <p class="eyebrow">${esc(S.list.source || t('list_title'))}</p>
-        <div class="h-section num">${fmtCost(total)}</div>
-        <span class="xs muted">${t('list_to_buy_left', fmtCost(left), done, items.length)}</span>
+        <div class="h-section num" data-total>${fmtCost(total)}</div>
+        <span class="xs muted" data-left>${t('list_to_buy_left', fmtCost(left), done, items.length)}</span>
       </div>
     </div>
     ${Object.entries(groups).sort((a, b) => (S.cats[a[0]]?.id ?? 99) - (S.cats[b[0]]?.id ?? 99)).map(([cat, list]) => `
       <div class="shop-group">
         <h3>${esc(getCatName(S.cats[cat], S.lang) || cat)}</h3>
-        <ul class="shop-list">${list.sort((a, b) => a.done - b.done).map(i => `
+        <ul class="shop-list">${list.map(i => `
           <li class="shop-item ${i.done ? 'done' : ''}" data-id="${i.id}">
-            <input type="checkbox" ${i.done ? 'checked' : ''} aria-label="Checked: ${esc(getFoodName(i, S.lang))}">
-            <div>
-              <div class="shop-item__name">${esc(shortName(i.name, i, S.lang))}</div>
-              <div class="shop-item__qty">${qtyText(i)}</div>
-            </div>
-            <div class="shop-item__cost">${fmtCost(i.cost)}</div>
+            <input class="shop-check" id="shop-${i.id}" type="checkbox" ${i.done ? 'checked' : ''} aria-label="${esc(getFoodName(i, S.lang))}">
+            <label class="shop-item__body" for="shop-${i.id}">
+              <span class="shop-item__name">${esc(shortName(i.name, i, S.lang))}</span>
+              <span class="shop-item__qty">${qtyText(i)}</span>
+            </label>
+            <span class="shop-item__cost">${fmtCost(i.cost)}</span>
           </li>`).join('')}</ul>
       </div>`).join('')}
   </div>`;
 }
 
+/* One state update path for the shopping list: the checkbox is the control
+   (tap, click on its label, keyboard Space), a tap elsewhere on the row
+   flips the same checkbox. Updates are surgical — no full re-render, so
+   focus, scroll position and row order never jump on mobile. */
+function setItemDone(id, done, li = null, box = null) {
+  const it = S.list.items.find(i => i.id === id);
+  if (!it) return;
+  it.done = Boolean(done);
+  store.set('list', S.list);
+  const row = li || $(`.shop-item[data-id="${id}"]`, $('#list-output'));
+  if (row) {
+    row.classList.toggle('done', it.done);
+    const check = box || $('.shop-check', row);
+    if (check) check.checked = it.done;
+  }
+  refreshListTotals();
+  updateBadges();
+}
+
+function refreshListTotals() {
+  const items = S.list.items;
+  const total = items.reduce((s, i) => s + i.cost, 0);
+  const left = items.filter(i => !i.done).reduce((s, i) => s + i.cost, 0);
+  const done = items.filter(i => i.done).length;
+  const totalEl = $('[data-total]', $('#list-output'));
+  const leftEl = $('[data-left]', $('#list-output'));
+  if (totalEl) totalEl.textContent = fmtCost(total);
+  if (leftEl) leftEl.textContent = t('list_to_buy_left', fmtCost(left), done, items.length);
+}
+
+function onListChange(e) {
+  const box = e.target.closest?.('.shop-check');
+  if (!box) return;
+  const li = box.closest('.shop-item');
+  if (!li) return;
+  setItemDone(+li.dataset.id, box.checked, li, box);
+}
+
 function onListClick(e) {
-  const li = e.target.closest('.shop-item'); if (!li) return;
-  const it = S.list.items.find(i => i.id === +li.dataset.id); if (!it) return;
-  it.done = !it.done; store.set('list', S.list); renderList(); updateBadges();
+  const li = e.target.closest?.('.shop-item');
+  if (!li) return;
+  // Clicks on the checkbox or its label already produce a `change` event.
+  if (e.target.closest('input, label')) return;
+  const box = $('.shop-check', li);
+  if (!box) return;
+  box.checked = !box.checked;
+  setItemDone(+li.dataset.id, box.checked, li, box);
 }
 
 function updateBadges() {
@@ -1646,6 +1680,9 @@ async function boot() {
   $('#week-output').addEventListener('click', onWeekClick);
   $('#week-build').addEventListener('click', buildWeekNow);
 
+  // Note: keyboard support comes from the native checkbox itself (Tab + Space).
+  // No extra key handler: a second tab stop per row would only add noise.
+  $('#list-output').addEventListener('change', onListChange);
   $('#list-output').addEventListener('click', onListClick);
   $('#list-clear').addEventListener('click', () => {
     openDialog(`<div class="dialog__body">

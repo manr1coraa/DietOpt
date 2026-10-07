@@ -398,9 +398,13 @@ details.more[open] summary::before { content: '–'; }
 .shop-list { list-style: none; padding: 0; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius); overflow: hidden; }
 .shop-item { display: grid; grid-template-columns: auto 1fr auto; gap: var(--space-3); align-items: center; padding: var(--space-3) var(--space-4); border-top: 1px solid var(--color-divider); cursor: pointer; user-select: none; }
 .shop-item:first-child { border-top: 0; }
-.shop-item input { width: 22px; height: 22px; accent-color: var(--color-primary); cursor: pointer; }
+.shop-item input { width: 22px; height: 22px; accent-color: var(--color-primary); cursor: pointer; flex: none; }
+.shop-check:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; border-radius: 4px; }
 .shop-item.done .shop-item__name { text-decoration: line-through; color: var(--color-text-faint); }
-.shop-item__name { font-size: var(--text-sm); font-weight: 550; }
+.shop-item.done .shop-item__qty { color: var(--color-text-faint); }
+.shop-item__body { display: block; min-width: 0; cursor: pointer; }
+.shop-item__name { display: block; font-size: var(--text-sm); font-weight: 550; overflow-wrap: anywhere; }
+.shop-item__qty { display: block; }
 .shop-item__qty { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-text-muted); }
 .shop-item__cost { font-family: var(--font-mono); font-size: var(--text-sm); white-space: nowrap; }
 
